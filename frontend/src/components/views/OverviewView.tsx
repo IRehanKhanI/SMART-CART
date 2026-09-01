@@ -1,5 +1,13 @@
 import React, { useState } from "react";
-import { OverviewMetrics, CriticalAlert, TabType, StoreMetrics, ShopperMetrics, InventoryItem, QueueData } from "../../types";
+import {
+  OverviewMetrics,
+  CriticalAlert,
+  TabType,
+  StoreMetrics,
+  ShopperMetrics,
+  InventoryItem,
+  QueueData,
+} from "../../types";
 
 interface OverviewViewProps {
   metrics?: OverviewMetrics | StoreMetrics | any;
@@ -56,30 +64,34 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     typeof metrics?.currentOccupancy === "number"
       ? metrics.currentOccupancy
       : typeof metrics?.activeShoppers === "number"
-      ? metrics.activeShoppers
-      : shoppers?.totalEntries && shoppers?.totalExits
-      ? Math.max(0, shoppers.totalEntries - shoppers.totalExits)
-      : 342;
+        ? metrics.activeShoppers
+        : Math.max(
+            0,
+            (shoppers?.totalEntries ?? 0) - (shoppers?.totalExits ?? 0),
+          );
 
-  const occupancyTrendPercent = metrics?.occupancyTrendPercent ?? shoppers?.entriesTrendPercent ?? 12;
+  const occupancyTrendPercent =
+    metrics?.occupancyTrendPercent ?? shoppers?.entriesTrendPercent ?? 0;
 
   const dailyFootfall =
     typeof metrics?.dailyFootfall === "number"
       ? metrics.dailyFootfall
       : typeof shoppers?.totalEntries === "number"
-      ? shoppers.totalEntries
-      : 4281;
-
-  const dailyFootfallTarget =
-    typeof metrics?.dailyFootfallTarget === "number" ? metrics.dailyFootfallTarget : 5000;
+        ? shoppers.totalEntries
+        : 0;
 
   const activeAlertsCount =
     typeof metrics?.activeAlertsCount === "number"
       ? metrics.activeAlertsCount
       : effectiveAlerts.filter((a) => !a.isAcknowledged).length;
 
-  const queueRisk =
-    metrics?.queueRisk || queues?.predictedRisk || "High";
+  const queueRisk = metrics?.queueRisk || queues?.predictedRisk || "LOW";
+  const criticalCount = effectiveAlerts.filter(
+    (alert) => !alert.isAcknowledged && alert.type === "critical",
+  ).length;
+  const warningCount = effectiveAlerts.filter(
+    (alert) => !alert.isAcknowledged && alert.type === "warning",
+  ).length;
 
   const getAlertBadgeColor = (type: string) => {
     switch (type) {
@@ -114,20 +126,22 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Current Occupancy
               </span>
-              <span className="material-symbols-outlined text-[20px]">groups</span>
+              <span className="material-symbols-outlined text-[20px]">
+                groups
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#202522] tracking-tight leading-none">
                 {currentOccupancy.toLocaleString()}
               </span>
               <span className="text-[12px] font-semibold text-[#166534] bg-[#166534]/10 px-1.5 py-0.5 rounded">
-                +{occupancyTrendPercent}% vs last hr
+                {occupancyTrendPercent >= 0 ? "+" : ""}
+                {occupancyTrendPercent}% entries vs yesterday
               </span>
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 flex items-center justify-between text-[11px] text-[#58605b]">
-            <span>Store Capacity: 800 Max</span>
-            <span className="font-medium">{((currentOccupancy / 800) * 100).toFixed(1)}% Full</span>
+            <span>Anonymous entry and exit events</span>
           </div>
         </div>
 
@@ -138,14 +152,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Daily Footfall
               </span>
-              <span className="material-symbols-outlined text-[20px]">trending_up</span>
+              <span className="material-symbols-outlined text-[20px]">
+                trending_up
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#202522] tracking-tight leading-none">
                 {dailyFootfall.toLocaleString()}
               </span>
               <span className="text-[12px] font-medium text-[#58605b]">
-                / {dailyFootfallTarget.toLocaleString()} Target
+                observed entries
               </span>
             </div>
           </div>
@@ -153,7 +169,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <div className="w-full bg-[#edeeec] rounded-full h-1.5 overflow-hidden">
               <div
                 className="bg-[#202522] h-1.5 rounded-full"
-                style={{ width: `${Math.min(100, (dailyFootfall / Math.max(1, dailyFootfallTarget)) * 100)}%` }}
+                style={{ width: dailyFootfall > 0 ? "100%" : "0%" }}
               ></div>
             </div>
           </div>
@@ -166,19 +182,21 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Active Alerts
               </span>
-              <span className="material-symbols-outlined text-[20px] text-[#991B1B]">notifications_active</span>
+              <span className="material-symbols-outlined text-[20px] text-[#991B1B]">
+                notifications_active
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#991B1B] tracking-tight leading-none">
                 {activeAlertsCount}
               </span>
               <span className="text-[12px] font-semibold text-[#991B1B] bg-[#991B1B]/10 px-1.5 py-0.5 rounded">
-                1 Critical
+                {criticalCount} Critical
               </span>
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 flex items-center justify-between text-[11px] text-[#58605b]">
-            <span>1 Warning, 1 Info</span>
+            <span>{warningCount} Warning</span>
             <button
               onClick={() => handleNavigate("inventory")}
               className="text-[#202522] font-semibold hover:underline cursor-pointer"
@@ -195,19 +213,25 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Queue Risk
               </span>
-              <span className="material-symbols-outlined text-[20px] text-[#B45309]">hourglass_top</span>
+              <span className="material-symbols-outlined text-[20px] text-[#B45309]">
+                hourglass_top
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#B45309] tracking-tight leading-none">
                 {String(queueRisk).toUpperCase()}
               </span>
               <span className="text-[12px] font-medium text-[#58605b]">
-                Peak in 15m
+                {queues?.peakExpectedMinutes
+                  ? `Peak in ${queues.peakExpectedMinutes}m`
+                  : "Current observation"}
               </span>
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 flex items-center justify-between text-[11px]">
-            <span className="text-[#58605b]">AI: Open Counter 4</span>
+            <span className="text-[#58605b]">
+              {queues?.aiRecommendation.title ?? "No recommendation"}
+            </span>
             <button
               onClick={() => handleNavigate("queues")}
               className="text-[#B45309] font-bold hover:underline cursor-pointer"
@@ -226,10 +250,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div className="bg-white border border-[#D9DDD8] rounded-lg shadow-xs overflow-hidden">
             <div className="p-4 border-b border-[#D9DDD8] flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <span className="material-symbols-outlined text-[20px] text-[#202522]">warning</span>
-                <h3 className="text-[14px] font-bold text-[#202522]">Recent Critical Alerts</h3>
+                <span className="material-symbols-outlined text-[20px] text-[#202522]">
+                  warning
+                </span>
+                <h3 className="text-[14px] font-bold text-[#202522]">
+                  Recent Critical Alerts
+                </h3>
               </div>
-              <span className="text-[11px] text-[#58605b] font-medium">Real-time edge detections</span>
+              <span className="text-[11px] text-[#58605b] font-medium">
+                Real-time edge detections
+              </span>
             </div>
 
             <div className="divide-y divide-[#D9DDD8]">
@@ -247,7 +277,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                       <div className="flex items-start space-x-3">
                         <div
                           className={`w-8 h-8 rounded flex items-center justify-center shrink-0 ${getAlertBadgeColor(
-                            alert.type
+                            alert.type,
                           )}`}
                         >
                           <span className="material-symbols-outlined text-[18px]">
@@ -256,10 +286,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-[13px] font-bold text-[#202522]">{alert.title}</h4>
+                            <h4 className="text-[13px] font-bold text-[#202522]">
+                              {alert.title}
+                            </h4>
                             <span
                               className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${getAlertBadgeColor(
-                                alert.type
+                                alert.type,
                               )}`}
                             >
                               {alert.type}
@@ -272,7 +304,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                             {alert.description}
                           </p>
                           <div className="text-[11px] text-[#858d88] mt-1.5 flex items-center gap-2">
-                            <span className="material-symbols-outlined text-[14px]">schedule</span>
+                            <span className="material-symbols-outlined text-[14px]">
+                              schedule
+                            </span>
                             <span>{alert.timeAgo}</span>
                           </div>
                         </div>
@@ -288,7 +322,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                           </button>
                         ) : (
                           <span className="text-[11px] text-[#166534] font-medium flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[14px]">check</span> Acked
+                            <span className="material-symbols-outlined text-[14px]">
+                              check
+                            </span>{" "}
+                            Acked
                           </span>
                         )}
                       </div>
@@ -302,13 +339,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           {/* Quick Operations Actions Panel */}
           <div className="bg-white border border-[#D9DDD8] rounded-lg p-5 shadow-xs">
             <h3 className="text-[14px] font-bold text-[#202522] mb-3 flex items-center gap-2">
-              <span className="material-symbols-outlined text-[20px]">bolt</span>
+              <span className="material-symbols-outlined text-[20px]">
+                bolt
+              </span>
               Store Operations Quick Actions
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <button
                 onClick={() => {
-                  handleAction("open-counter");
                   handleNavigate("queues");
                 }}
                 className="p-3 bg-[#f9faf8] hover:bg-[#202522] hover:text-white border border-[#D9DDD8] rounded-md text-left transition-colors group cursor-pointer"
@@ -321,13 +359,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     Queues
                   </span>
                 </div>
-                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">Open Counter 4</div>
-                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">Resolve congestion spike</div>
+                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">
+                  Review checkout queues
+                </div>
+                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">
+                  Open and close configured counters
+                </div>
               </button>
 
               <button
                 onClick={() => {
-                  handleAction("replenish-aisle-12");
                   handleNavigate("inventory");
                 }}
                 className="p-3 bg-[#f9faf8] hover:bg-[#202522] hover:text-white border border-[#D9DDD8] rounded-md text-left transition-colors group cursor-pointer"
@@ -340,12 +381,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     Stock
                   </span>
                 </div>
-                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">Restock Aisle 12</div>
-                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">Dispatch backroom staff</div>
+                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">
+                  Review inventory
+                </div>
+                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">
+                  Act on observed stock levels
+                </div>
               </button>
 
               <button
-                onClick={() => handleAction("dispatch-cleaner")}
+                onClick={() => handleNavigate("overview")}
                 className="p-3 bg-[#f9faf8] hover:bg-[#202522] hover:text-white border border-[#D9DDD8] rounded-md text-left transition-colors group cursor-pointer"
               >
                 <div className="flex items-center justify-between mb-1.5">
@@ -356,8 +401,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     Safety
                   </span>
                 </div>
-                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">Dispatch Cleaning</div>
-                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">Produce spill zone</div>
+                <div className="text-[13px] font-bold text-[#202522] group-hover:text-white">
+                  Review alerts
+                </div>
+                <div className="text-[11px] text-[#58605b] group-hover:text-gray-300">
+                  Acknowledge observed events
+                </div>
               </button>
 
               <button
@@ -372,8 +421,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     AI Vision
                   </span>
                 </div>
-                <div className="text-[13px] font-bold text-white">Live AI Vision</div>
-                <div className="text-[11px] text-gray-300">Run phone/cam inference</div>
+                <div className="text-[13px] font-bold text-white">
+                  Live AI Vision
+                </div>
+                <div className="text-[11px] text-gray-300">
+                  Run phone/cam inference
+                </div>
               </button>
             </div>
           </div>
@@ -384,7 +437,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div className="bg-white border border-[#D9DDD8] rounded-lg p-5 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-[14px] font-bold text-[#202522] flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px]">map</span>
+                <span className="material-symbols-outlined text-[18px]">
+                  map
+                </span>
                 Store Zone Map
               </h3>
               <button
@@ -395,100 +450,41 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </button>
             </div>
 
-            {/* Interactive Blueprint Schematic SVG */}
-            <div className="relative bg-[#f9faf8] border border-[#D9DDD8] rounded-md p-3 aspect-[4/3] flex flex-col justify-between">
-              {/* Floorplan zones SVG layout */}
-              <svg viewBox="0 0 400 300" className="w-full h-full">
-                {/* Store Outline */}
-                <rect x="10" y="10" width="380" height="280" fill="#fdfdfd" stroke="#D9DDD8" strokeWidth="2" rx="4" />
-                
-                {/* Entrance */}
-                <rect x="160" y="280" width="80" height="10" fill="#166534" rx="2" />
-                <text x="200" y="275" textAnchor="middle" fontSize="9" fill="#166534" fontWeight="600">
-                  MAIN ENTRANCE
-                </text>
-
-                {/* Zone 1: Produce */}
-                <g
-                  className="cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedZone("Produce")}
-                >
-                  <rect x="25" y="25" width="160" height="90" fill="#166534" fillOpacity="0.12" stroke="#166534" strokeWidth="1.5" strokeDasharray="3 2" rx="3" />
-                  <text x="35" y="45" fontSize="11" fontWeight="700" fill="#166534">Fresh Produce</text>
-                  <text x="35" y="60" fontSize="9" fill="#58605b">Occupancy: 84</text>
-                  <circle cx="165" cy="42" r="4" fill="#166534" />
-                </g>
-
-                {/* Zone 2: Electronics */}
-                <g
-                  className="cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedZone("Electronics")}
-                >
-                  <rect x="215" y="25" width="160" height="90" fill="#B45309" fillOpacity="0.12" stroke="#B45309" strokeWidth="1.5" rx="3" />
-                  <text x="225" y="45" fontSize="11" fontWeight="700" fill="#B45309">Electronics</text>
-                  <text x="225" y="60" fontSize="9" fill="#58605b">Occupancy: 89 (Dwell High)</text>
-                  <circle cx="355" cy="42" r="4" fill="#B45309" className="animate-ping" />
-                </g>
-
-                {/* Zone 3: Grocery & Pantry */}
-                <g
-                  className="cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedZone("Grocery")}
-                >
-                  <rect x="25" y="130" width="160" height="100" fill="#1E40AF" fillOpacity="0.1" stroke="#1E40AF" strokeWidth="1.5" rx="3" />
-                  <text x="35" y="150" fontSize="11" fontWeight="700" fill="#1E40AF">Grocery & Pantry</text>
-                  <text x="35" y="165" fontSize="9" fill="#58605b">Occupancy: 142</text>
-                  <text x="35" y="180" fontSize="9" fill="#991B1B">Low Stock: Aisle 12</text>
-                </g>
-
-                {/* Zone 4: Apparel & Seasonal */}
-                <g
-                  className="cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedZone("Apparel")}
-                >
-                  <rect x="215" y="130" width="160" height="100" fill="#58605b" fillOpacity="0.08" stroke="#58605b" strokeWidth="1.5" strokeDasharray="3 2" rx="3" />
-                  <text x="225" y="150" fontSize="11" fontWeight="700" fill="#202522">Apparel & Seasonal</text>
-                  <text x="225" y="165" fontSize="9" fill="#58605b">Occupancy: 45</text>
-                </g>
-
-                {/* Checkout Lane */}
-                <g
-                  className="cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => setSelectedZone("Checkout")}
-                >
-                  <rect x="25" y="245" width="120" height="30" fill="#991B1B" fillOpacity="0.15" stroke="#991B1B" strokeWidth="1.5" rx="2" />
-                  <text x="85" y="263" textAnchor="middle" fontSize="10" fontWeight="700" fill="#991B1B">
-                    Checkout: Congested
-                  </text>
-                </g>
-              </svg>
-
-              {/* Status footer for floorplan */}
-              <div className="mt-2 pt-2 border-t border-[#D9DDD8] flex items-center justify-between text-[11px] text-[#58605b]">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#166534]"></span>
-                  <span>Produce</span>
+            <div className="bg-[#f9faf8] border border-[#D9DDD8] rounded-md p-3 aspect-[4/3] grid grid-cols-2 gap-2 content-start">
+              {(shoppers?.zonePopularity ?? []).length === 0 ? (
+                <div className="col-span-2 self-center text-center text-[12px] text-[#58605b]">
+                  No configured zone observations.
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#1E40AF]"></span>
-                  <span>Grocery</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#B45309]"></span>
-                  <span>Electronics</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#991B1B]"></span>
-                  <span>Checkout</span>
-                </div>
-              </div>
+              ) : (
+                shoppers?.zonePopularity.map((zone) => (
+                  <button
+                    key={zone.id}
+                    onClick={() => setSelectedZone(zone.zone)}
+                    className="border border-[#D9DDD8] bg-white p-3 rounded text-left hover:border-[#202522]"
+                  >
+                    <div className="text-[12px] font-bold text-[#202522]">
+                      {zone.zone}
+                    </div>
+                    <div className="text-[11px] text-[#58605b] mt-1">
+                      {zone.activeCount} active
+                    </div>
+                    <div className="text-[11px] text-[#58605b]">
+                      {zone.avgDwellMinutes}m average dwell
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
 
             {selectedZone && (
               <div className="mt-3 p-2.5 bg-[#f9faf8] border border-[#D9DDD8] rounded text-[12px] flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-[#202522]">{selectedZone} Zone Selected</span>
-                  <div className="text-[11px] text-[#58605b]">Cameras & Sensors operating at 60 FPS</div>
+                  <span className="font-bold text-[#202522]">
+                    {selectedZone} Zone Selected
+                  </span>
+                  <div className="text-[11px] text-[#58605b]">
+                    Values are derived from anonymous local events.
+                  </div>
                 </div>
                 <button
                   onClick={() => handleNavigate("shoppers")}
@@ -505,26 +501,34 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <h4 className="text-[13px] font-bold text-[#202522] flex items-center justify-between">
               <span>Edge Telemetry Feed</span>
               <span className="text-[10px] font-mono text-[#166534] bg-[#166534]/10 px-1.5 py-0.5 rounded">
-                LIVE 60Hz
+                LOCAL
               </span>
             </h4>
 
             <div className="space-y-2 text-[12px]">
               <div className="flex justify-between items-center py-1 border-b border-[#D9DDD8]/50">
-                <span className="text-[#58605b]">Camera Ingress Rate</span>
-                <span className="font-mono font-semibold text-[#202522]">1,240 frames/sec</span>
+                <span className="text-[#58605b]">Observed shopper entries</span>
+                <span className="font-mono font-semibold text-[#202522]">
+                  {shoppers?.totalEntries ?? 0}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-[#D9DDD8]/50">
-                <span className="text-[#58605b]">ESP32 IoT Heartbeats</span>
-                <span className="font-mono font-semibold text-[#166534]">100% OK (38 nodes)</span>
+                <span className="text-[#58605b]">Configured zones</span>
+                <span className="font-mono font-semibold text-[#166534]">
+                  {shoppers?.zonePopularity.length ?? 0}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-[#D9DDD8]/50">
-                <span className="text-[#58605b]">Edge Inference Latency</span>
-                <span className="font-mono font-semibold text-[#202522]">14.2 ms / frame</span>
+                <span className="text-[#58605b]">Checkout counters</span>
+                <span className="font-mono font-semibold text-[#202522]">
+                  {queues?.counters.length ?? 0}
+                </span>
               </div>
               <div className="flex justify-between items-center py-1">
                 <span className="text-[#58605b]">Privacy Scrub Mode</span>
-                <span className="font-mono font-semibold text-[#166534]">Active (No PII Stored)</span>
+                <span className="font-mono font-semibold text-[#166534]">
+                  No raw frames stored
+                </span>
               </div>
             </div>
           </div>

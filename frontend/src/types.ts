@@ -1,12 +1,12 @@
-export type TabType = 
-  | 'overview'
-  | 'shoppers'
-  | 'inventory'
-  | 'queues'
-  | 'analytics'
-  | 'devices'
-  | 'settings'
-  | 'camera';
+export type TabType =
+  | "overview"
+  | "shoppers"
+  | "inventory"
+  | "queues"
+  | "analytics"
+  | "devices"
+  | "settings"
+  | "camera";
 
 export type NavigationTab = TabType;
 
@@ -16,7 +16,7 @@ export interface OverviewMetrics {
   dailyFootfall: number;
   dailyFootfallTarget: number;
   activeAlertsCount: number;
-  queueRisk: 'Low' | 'Medium' | 'High' | 'Critical';
+  queueRisk: "Low" | "Medium" | "High" | "Critical";
   lastSyncTime: string;
   systemOperational: boolean;
 }
@@ -34,7 +34,7 @@ export interface StoreMetrics {
 
 export interface CriticalAlert {
   id: string;
-  type: 'critical' | 'warning' | 'info';
+  type: "critical" | "warning" | "info";
   title: string;
   description: string;
   timeAgo: string;
@@ -62,7 +62,14 @@ export interface ZonePopularityItem {
   zone: string;
   activeCount: number;
   avgDwellMinutes: number;
-  statusColor: 'info' | 'warning' | 'tint' | 'dim' | 'error' | 'success' | string;
+  statusColor:
+    | "info"
+    | "warning"
+    | "tint"
+    | "dim"
+    | "error"
+    | "success"
+    | string;
 }
 
 export interface InventoryItem {
@@ -73,7 +80,7 @@ export interface InventoryItem {
   currentStock: number;
   maxStock: number;
   threshold?: number;
-  status: 'Optimal' | 'Low Stock' | 'Out of Stock' | 'Restocking...' | string;
+  status: "Optimal" | "Low Stock" | "Out of Stock" | "Restocking..." | string;
   oosDuration?: string;
   imageIcon?: string;
 }
@@ -99,11 +106,11 @@ export interface QueueCounter {
   queueLength: number | null;
   capacity: number;
   estWaitMins: number | null;
-  status: 'Normal' | 'Elevated' | 'Congested' | 'Offline' | string;
+  status: "Normal" | "Elevated" | "Congested" | "Offline" | string;
 }
 
 export interface QueueData {
-  predictedRisk: 'HIGH' | 'MEDIUM' | 'LOW' | string;
+  predictedRisk: "HIGH" | "MEDIUM" | "LOW" | string;
   peakExpectedMinutes: number;
   aiRecommendation: {
     title: string;
@@ -123,8 +130,13 @@ export interface EdgeDevice {
   id: string;
   name: string;
   location: string;
-  type: 'AI Camera (4K)' | 'IoT Sensor (ESP32)' | 'Edge Compute Node' | 'AI Camera (1080p)' | string;
-  status: 'Online' | 'Syncing' | 'Local Mode' | 'Offline' | string;
+  type:
+    | "AI Camera (4K)"
+    | "IoT Sensor (ESP32)"
+    | "Edge Compute Node"
+    | "AI Camera (1080p)"
+    | string;
+  status: "Online" | "Syncing" | "Local Mode" | "Offline" | string;
   cpuPercent?: number;
   tempCelsius?: number;
   signalDbm: number | string; // e.g. -42 dBm or "LAN" or "Disconnected"
@@ -143,7 +155,7 @@ export interface ReportItem {
   id: string;
   filename: string;
   dateStr: string;
-  statusColor?: 'success' | 'info' | 'warning' | string;
+  statusColor?: "success" | "info" | "warning" | string;
   fileSize: string;
   type: string;
 }
@@ -181,18 +193,40 @@ export interface NotificationSettings {
 
 export interface VisionAnalysisResult {
   crowdCount: number;
-  detectedPeople: { x: number; y: number; width: number; height: number; label: string; confidence: number }[];
+  detectedPeople: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label: string;
+    confidence: number;
+  }[];
   shelfAnalysis: {
-    stockLevelPercent: number;
-    emptySlotsDetected: number;
+    stockLevelPercent: number | null;
+    emptySlotsDetected: number | null;
     facingCondition: string;
   };
   queueEstimation: {
-    queueLength: number;
-    estimatedWaitMinutes: number;
+    queueLength: number | null;
+    estimatedWaitMinutes: number | null;
   };
   hazardsDetected: string[];
   operationalAdvice: string;
   latencyMs: number;
   timestamp: string;
+}
+
+export interface StockAnalysisResult {
+  productCount: number;
+  detectedProducts: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label: string;
+    confidence: number;
+  }[];
+  latencyMs: number;
+  timestamp: string;
+  status: string;
 }

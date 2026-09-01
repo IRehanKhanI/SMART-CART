@@ -11,6 +11,9 @@ interface SideNavBarProps {
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
   onOpenAiAdvisor?: () => void;
+  storeName?: string;
+  storeId?: string;
+  backendAvailable?: boolean;
 }
 
 export const SideNavBar: React.FC<SideNavBarProps> = ({
@@ -22,10 +25,18 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
   isOpenMobile = false,
   onCloseMobile,
   onOpenAiAdvisor,
+  storeName = "No store configured",
+  storeId = "—",
+  backendAvailable = false,
 }) => {
   const selectedTab = currentTab || activeTab || "overview";
   const totalAlerts = activeAlertsCount || activeAlertCount || 0;
-  const navItems: { id: TabType; label: string; icon: string; badge?: number }[] = [
+  const navItems: {
+    id: TabType;
+    label: string;
+    icon: string;
+    badge?: number;
+  }[] = [
     { id: "overview", label: "Overview", icon: "dashboard" },
     { id: "shoppers", label: "Shoppers", icon: "group" },
     { id: "inventory", label: "Inventory", icon: "inventory_2" },
@@ -57,13 +68,17 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
           <div className="p-5 border-b border-[#D9DDD8] flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="w-9 h-9 bg-[#202522] rounded-md flex items-center justify-center text-white">
-                <span className="material-symbols-outlined text-[20px]">storefront</span>
+                <span className="material-symbols-outlined text-[20px]">
+                  storefront
+                </span>
               </div>
               <div>
                 <h1 className="text-[14px] font-bold tracking-tight text-[#202522] uppercase">
                   Retail Intelligence
                 </h1>
-                <p className="text-[11px] text-[#58605b] font-medium">SIH-26179 • Edge Command</p>
+                <p className="text-[11px] text-[#58605b] font-medium">
+                  SIH-26179 • Edge Command
+                </p>
               </div>
             </div>
             <button
@@ -79,14 +94,20 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
           <div className="px-4 pt-4 pb-2">
             <div className="bg-[#f9faf8] border border-[#D9DDD8] rounded-md p-2.5 flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-[#166534] animate-pulse"></span>
+                <span
+                  className={`w-2 h-2 rounded-full ${backendAvailable ? "bg-[#166534]" : "bg-[#991B1B]"}`}
+                ></span>
                 <div>
-                  <div className="text-[12px] font-bold text-[#202522]">Downtown Flagship</div>
-                  <div className="text-[11px] text-[#58605b]">Store ID: 92841</div>
+                  <div className="text-[12px] font-bold text-[#202522]">
+                    {storeName || "No store configured"}
+                  </div>
+                  <div className="text-[11px] text-[#58605b]">
+                    Store ID: {storeId || "—"}
+                  </div>
                 </div>
               </div>
               <span className="text-[10px] font-semibold uppercase bg-white border border-[#D9DDD8] px-1.5 py-0.5 rounded text-[#58605b]">
-                Live
+                {backendAvailable ? "Live" : "Offline"}
               </span>
             </div>
           </div>
@@ -156,23 +177,22 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
 
         {/* Footer / System Status */}
         <div className="p-4 border-t border-[#D9DDD8] bg-[#fdfdfd]">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#166534]"></span>
-              <span className="text-[11px] font-bold tracking-wider uppercase text-[#166534]">
-                System Operational
+              <span
+                className={`w-2 h-2 rounded-full ${backendAvailable ? "bg-[#166534]" : "bg-[#991B1B]"}`}
+              ></span>
+              <span
+                className={`text-[11px] font-bold tracking-wider uppercase ${backendAvailable ? "text-[#166534]" : "text-[#991B1B]"}`}
+              >
+                {backendAvailable
+                  ? "Local backend connected"
+                  : "Backend unavailable"}
               </span>
             </div>
-            <span className="text-[11px] font-medium text-[#58605b]">42ms</span>
           </div>
-
-          <div className="text-[11px] text-[#58605b] flex justify-between items-center">
-            <span>Edge Nodes: 138/142</span>
-            <span className="text-[#166534] font-medium">97.2%</span>
-          </div>
-
-          <div className="w-full bg-[#edeeec] rounded-full h-1.5 mt-1.5 overflow-hidden">
-            <div className="bg-[#166534] h-1.5 rounded-full w-[97.2%]"></div>
+          <div className="text-[11px] text-[#58605b] mt-1">
+            Django + SQLite edge store
           </div>
         </div>
       </aside>

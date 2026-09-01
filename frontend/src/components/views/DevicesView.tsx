@@ -16,17 +16,27 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [pingingId, setPingingId] = useState<string | null>(null);
-  const [pingResult, setPingResult] = useState<{ id: string; ms: number } | null>(null);
+  const [pingResult, setPingResult] = useState<{
+    id: string;
+    ms: number;
+  } | null>(null);
 
   const filteredFleet = fleet.filter((device) => {
     const matchesSearch =
       device.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       device.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = typeFilter === "all" || device.type.toLowerCase().includes(typeFilter.toLowerCase());
-    const matchesStatus = statusFilter === "all" || device.status.toLowerCase() === statusFilter.toLowerCase();
+    const matchesType =
+      typeFilter === "all" ||
+      device.type.toLowerCase().includes(typeFilter.toLowerCase());
+    const matchesStatus =
+      statusFilter === "all" ||
+      device.status.toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesType && matchesStatus;
   });
+  const fleetHealthPercent = stats.totalDevices
+    ? Math.round((stats.onlineCount / stats.totalDevices) * 1000) / 10
+    : 0;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -43,25 +53,21 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
     }
   };
 
-  const [restartingId, setRestartingId] = useState<string | null>(null);
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
-
-  const handlePing = (id: string) => {
+  const handlePing = async (id: string) => {
     setPingingId(id);
-    setTimeout(() => {
+    const started = performance.now();
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/devices/${id}/health/`,
+      );
+      if (!response.ok) throw new Error("Heartbeat check failed");
+      setPingResult({ id, ms: Math.round(performance.now() - started) });
+    } catch {
+      setPingResult({ id, ms: -1 });
+    } finally {
       setPingingId(null);
-      setPingResult({ id, ms: Math.floor(12 + Math.random() * 25) });
       setTimeout(() => setPingResult(null), 3000);
-    }, 600);
-  };
-
-  const handleRestart = (id: string) => {
-    setRestartingId(id);
-    setActionFeedback(`Reboot signal dispatched to edge device ${id}. Telemetry recovering...`);
-    setTimeout(() => {
-      setRestartingId(null);
-      setTimeout(() => setActionFeedback(null), 3500);
-    }, 1200);
+    }
   };
 
   return (
@@ -74,7 +80,9 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Total Devices
               </span>
-              <span className="material-symbols-outlined text-[20px]">devices</span>
+              <span className="material-symbols-outlined text-[20px]">
+                devices
+              </span>
             </div>
             <div className="text-[36px] font-bold text-[#202522] tracking-tight leading-none font-mono">
               {stats.totalDevices}
@@ -91,19 +99,21 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Online & Synced
               </span>
-              <span className="material-symbols-outlined text-[20px] text-[#166534]">sensors</span>
+              <span className="material-symbols-outlined text-[20px] text-[#166534]">
+                sensors
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#166534] tracking-tight leading-none font-mono">
                 {stats.onlineCount}
               </span>
               <span className="text-[12px] font-semibold text-[#166534] bg-[#166534]/10 px-1.5 py-0.5 rounded">
-                97.2% Fleet Health
+                {fleetHealthPercent}% Fleet Health
               </span>
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 text-[11px] text-[#58605b]">
-            Heartbeat Interval: 5 seconds
+            Based on latest persisted heartbeat
           </div>
         </div>
 
@@ -113,19 +123,21 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Offline / Issues
               </span>
-              <span className="material-symbols-outlined text-[20px] text-[#991B1B]">error</span>
+              <span className="material-symbols-outlined text-[20px] text-[#991B1B]">
+                error
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#991B1B] tracking-tight leading-none font-mono">
                 {stats.offlineCount}
               </span>
               <span className="text-[12px] font-semibold text-[#991B1B] bg-[#991B1B]/10 px-1.5 py-0.5 rounded">
-                1 Requires Inspection
+                {stats.offlineCount} Requires Inspection
               </span>
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 text-[11px] text-[#58605b]">
-            CAM-CHK-03 disconnected
+            Devices currently marked offline
           </div>
         </div>
 
@@ -135,7 +147,9 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider">
                 Avg Processing Delay
               </span>
-              <span className="material-symbols-outlined text-[20px]">speed</span>
+              <span className="material-symbols-outlined text-[20px]">
+                speed
+              </span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-[36px] font-bold text-[#202522] tracking-tight leading-none font-mono">
@@ -145,27 +159,21 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 text-[11px] text-[#166534] font-medium">
-            Ultra-low edge AI execution
+            Measured local inference latency
           </div>
         </div>
       </div>
-
-      {/* Feedback Banner */}
-      {actionFeedback && (
-        <div className="p-3 bg-[#166534]/10 text-[#166534] text-[12px] font-semibold rounded-md border border-[#166534]/20 flex items-center gap-2">
-          <span className="material-symbols-outlined text-[18px]">check_circle</span>
-          <span>{actionFeedback}</span>
-        </div>
-      )}
 
       {/* Main Table: Edge Fleet Status */}
       <div className="bg-white border border-[#D9DDD8] rounded-lg shadow-xs overflow-hidden">
         {/* Table Controls */}
         <div className="p-4 border-b border-[#D9DDD8] flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h3 className="text-[14px] font-bold text-[#202522]">Edge Fleet Device Status</h3>
+            <h3 className="text-[14px] font-bold text-[#202522]">
+              Edge Fleet Device Status
+            </h3>
             <p className="text-[12px] text-[#58605b]">
-              Local IoT hardware telemetry and remote gateway management
+              Local camera, sensor, and edge-node heartbeats
             </p>
           </div>
 
@@ -202,7 +210,9 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
               onClick={onOpenRegisterModal}
               className="px-3 py-1.5 bg-[#202522] hover:bg-black text-white text-[12px] font-semibold rounded-md transition-colors flex items-center gap-1.5"
             >
-              <span className="material-symbols-outlined text-[16px]">add_circle</span>
+              <span className="material-symbols-outlined text-[16px]">
+                add_circle
+              </span>
               Register Device
             </button>
           </div>
@@ -229,13 +239,20 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
                 const isPinging = pingingId === device.id;
 
                 return (
-                  <tr key={device.id} className="hover:bg-[#f9faf8] transition-colors">
+                  <tr
+                    key={device.id}
+                    className="hover:bg-[#f9faf8] transition-colors"
+                  >
                     <td className="py-3.5 px-4 font-mono font-bold text-[#202522]">
                       {device.id}
                     </td>
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-[#202522]">{device.name}</div>
-                      <div className="text-[11px] text-[#58605b]">{device.location}</div>
+                      <div className="font-bold text-[#202522]">
+                        {device.name}
+                      </div>
+                      <div className="text-[11px] text-[#58605b]">
+                        {device.location}
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-[#58605b] font-medium">
                       {device.type}
@@ -243,7 +260,7 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
                     <td className="py-3.5 px-4">
                       <span
                         className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded border ${getStatusBadge(
-                          device.status
+                          device.status,
                         )}`}
                       >
                         {device.status}
@@ -252,10 +269,19 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
                     <td className="py-3.5 px-4 font-mono text-[12px]">
                       {device.cpuPercent !== undefined ? (
                         <span>
-                          <span className={device.cpuPercent > 80 ? "text-[#991B1B] font-bold" : "text-[#202522]"}>
+                          <span
+                            className={
+                              device.cpuPercent > 80
+                                ? "text-[#991B1B] font-bold"
+                                : "text-[#202522]"
+                            }
+                          >
                             {device.cpuPercent}%
                           </span>{" "}
-                          • <span className="text-[#58605b]">{device.tempCelsius}°C</span>
+                          •{" "}
+                          <span className="text-[#58605b]">
+                            {device.tempCelsius}°C
+                          </span>
                         </span>
                       ) : (
                         <span className="text-[#58605b]">—</span>
@@ -273,16 +299,15 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
                           onClick={() => handlePing(device.id)}
                           disabled={isPinging || device.status === "Offline"}
                           className="px-2 py-1 text-[11px] font-semibold text-[#202522] bg-[#f9faf8] hover:bg-[#edeeec] border border-[#D9DDD8] rounded transition-colors disabled:opacity-40"
-                          title="Ping Test"
+                          title="Check backend heartbeat"
                         >
-                          {isPinging ? "..." : isPinged ? `${pingResult.ms}ms` : "Ping"}
-                        </button>
-                        <button
-                          onClick={() => handleRestart(device.id)}
-                          className="p-1 text-[#58605b] hover:text-[#202522] rounded hover:bg-[#edeeec]"
-                          title="Restart Node"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+                          {isPinging
+                            ? "..."
+                            : isPinged
+                              ? pingResult.ms >= 0
+                                ? `${pingResult.ms}ms`
+                                : "Unavailable"
+                              : "Check"}
                         </button>
                       </div>
                     </td>

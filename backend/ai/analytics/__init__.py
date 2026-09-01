@@ -1,0 +1,1 @@
+"""Geometry-based retail analytics."""

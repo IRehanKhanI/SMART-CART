@@ -5,7 +5,10 @@ interface AiAdvisorModalProps {
   onClose: () => void;
 }
 
-export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose }) => {
+export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({
+  isOpen,
+  onClose,
+}) => {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [conversation, setConversation] = useState<
@@ -28,24 +31,38 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
     setQuery("");
     setConversation((prev) => [
       ...prev,
-      { role: "user", text: userText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+      {
+        role: "user",
+        text: userText,
+        time: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      },
     ]);
     setLoading(true);
 
     try {
-      const response = await fetch("/api/ai/operational-advice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: userText }),
-      });
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/store/operational-advice",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: userText }),
+        },
+      );
 
+      if (!response.ok) throw new Error("Local advisor unavailable");
       const data = await response.json();
       setConversation((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: data.advice || "Advice generated based on current store telemetry.",
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          text: data.advice,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
         },
       ]);
     } catch (err) {
@@ -53,8 +70,11 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
         ...prev,
         {
           role: "assistant",
-          text: "Opening Counter 4 and dispatching dairy aisle restock recommended based on current traffic influx.",
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          text: "Live operational advice is unavailable because the local backend could not be reached.",
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
         },
       ]);
     } finally {
@@ -68,10 +88,16 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
         {/* Modal Header */}
         <div className="p-4 border-b border-[#D9DDD8] flex items-center justify-between bg-[#202522] text-white">
           <div className="flex items-center space-x-2.5">
-            <span className="material-symbols-outlined text-[20px] text-emerald-400">psychology</span>
+            <span className="material-symbols-outlined text-[20px] text-emerald-400">
+              psychology
+            </span>
             <div>
-              <h3 className="text-[14px] font-bold">Edge-AI Retail Operations Copilot</h3>
-              <p className="text-[11px] text-gray-300">Grounded with live store telemetry & optical data</p>
+              <h3 className="text-[14px] font-bold">
+                Edge-AI Retail Operations Copilot
+              </h3>
+              <p className="text-[11px] text-gray-300">
+                Grounded with live store telemetry & optical data
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="text-gray-300 hover:text-white">
@@ -95,12 +121,16 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
               >
                 {msg.text}
               </div>
-              <span className="text-[10px] text-[#58605b] mt-1 px-1">{msg.time}</span>
+              <span className="text-[10px] text-[#58605b] mt-1 px-1">
+                {msg.time}
+              </span>
             </div>
           ))}
           {loading && (
             <div className="flex items-center space-x-2 text-[12px] text-[#58605b] p-2 bg-white border border-[#D9DDD8] rounded-lg w-fit">
-              <span className="material-symbols-outlined text-[16px] animate-spin">autorenew</span>
+              <span className="material-symbols-outlined text-[16px] animate-spin">
+                autorenew
+              </span>
               <span>Synthesizing store intelligence...</span>
             </div>
           )}
@@ -108,21 +138,33 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
 
         {/* Quick Prompts */}
         <div className="px-4 py-2 border-t border-[#D9DDD8] bg-white flex items-center space-x-1.5 overflow-x-auto text-[11px]">
-          <span className="text-[#58605b] shrink-0 font-medium">Quick Query:</span>
+          <span className="text-[#58605b] shrink-0 font-medium">
+            Quick Query:
+          </span>
           <button
-            onClick={() => setQuery("How can we reduce checkout queue wait times right now?")}
+            onClick={() =>
+              setQuery("How can we reduce checkout queue wait times right now?")
+            }
             className="px-2.5 py-1 bg-[#f9faf8] hover:bg-[#edeeec] border border-[#D9DDD8] rounded-full text-[#202522] shrink-0"
           >
             Reduce Queue Times
           </button>
           <button
-            onClick={() => setQuery("What are the highest risk stockouts in Produce & Dairy?")}
+            onClick={() =>
+              setQuery(
+                "What are the highest risk stockouts in Produce & Dairy?",
+              )
+            }
             className="px-2.5 py-1 bg-[#f9faf8] hover:bg-[#edeeec] border border-[#D9DDD8] rounded-full text-[#202522] shrink-0"
           >
             Critical Stockouts
           </button>
           <button
-            onClick={() => setQuery("Analyze footfall conversion between Grocery and Electronics.")}
+            onClick={() =>
+              setQuery(
+                "Analyze footfall conversion between Grocery and Electronics.",
+              )
+            }
             className="px-2.5 py-1 bg-[#f9faf8] hover:bg-[#edeeec] border border-[#D9DDD8] rounded-full text-[#202522] shrink-0"
           >
             Footfall Conversion
@@ -130,7 +172,10 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ isOpen, onClose 
         </div>
 
         {/* Input Form */}
-        <form onSubmit={handleSend} className="p-3 border-t border-[#D9DDD8] bg-white flex items-center space-x-2">
+        <form
+          onSubmit={handleSend}
+          className="p-3 border-t border-[#D9DDD8] bg-white flex items-center space-x-2"
+        >
           <input
             type="text"
             placeholder="Ask AI Copilot about store operations, inventory, or queue optimization..."

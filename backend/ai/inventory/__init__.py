@@ -1,0 +1,1 @@
+"""Shelf and planogram analysis."""

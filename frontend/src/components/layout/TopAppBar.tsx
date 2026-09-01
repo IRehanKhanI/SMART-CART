@@ -41,7 +41,13 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   useEffect(() => {
     const updateTime = () => {
       const d = new Date();
-      setCurrentTime(d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" }));
+      setCurrentTime(
+        d.toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
@@ -49,17 +55,44 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   }, []);
 
   const tabTitles: Record<TabType, { title: string; subtitle: string }> = {
-    overview: { title: "Command Center Overview", subtitle: "Real-time edge telemetry and store operational summary" },
-    shoppers: { title: "Shopper Analytics", subtitle: "Footfall trend, dwell duration and zone heatmaps" },
-    inventory: { title: "Inventory & Shelf Intelligence", subtitle: "Out-of-stock monitoring and automated replenishment" },
-    queues: { title: "Queue & Checkout Intelligence", subtitle: "Predictive congestion risk and counter allocation" },
-    analytics: { title: "Reports & Performance Audit", subtitle: "Custom telemetry analysis and operational export" },
-    devices: { title: "Edge Fleet & IoT Devices", subtitle: "AI cameras, ESP32 sensors and edge gateway status" },
-    camera: { title: "Edge AI Live Vision Engine", subtitle: "Computer vision inference on replaceable camera feeds" },
-    settings: { title: "Store & Zone Configuration", subtitle: "Profile, operational hours and alert threshold parameters" },
+    overview: {
+      title: "Command Center Overview",
+      subtitle: "Real-time edge telemetry and store operational summary",
+    },
+    shoppers: {
+      title: "Shopper Analytics",
+      subtitle: "Footfall trend, dwell duration and zone heatmaps",
+    },
+    inventory: {
+      title: "Inventory & Shelf Intelligence",
+      subtitle: "Out-of-stock monitoring and automated replenishment",
+    },
+    queues: {
+      title: "Queue & Checkout Intelligence",
+      subtitle: "Predictive congestion risk and counter allocation",
+    },
+    analytics: {
+      title: "Reports & Performance Audit",
+      subtitle: "Custom telemetry analysis and operational export",
+    },
+    devices: {
+      title: "Edge Fleet & IoT Devices",
+      subtitle: "AI cameras, ESP32 sensors and edge gateway status",
+    },
+    camera: {
+      title: "Edge AI Live Vision Engine",
+      subtitle: "Computer vision inference on replaceable camera feeds",
+    },
+    settings: {
+      title: "Store & Zone Configuration",
+      subtitle: "Profile, operational hours and alert threshold parameters",
+    },
   };
 
-  const currentInfo = tabTitles[selectedTab] || { title: "Retail Operations Command", subtitle: "SIH-26179" };
+  const currentInfo = tabTitles[selectedTab] || {
+    title: "Retail Operations Command",
+    subtitle: "SIH-26179",
+  };
 
   return (
     <header
@@ -116,9 +149,14 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
           }`}
           title="Click to refresh telemetry"
         >
-          <span className={`w-2 h-2 rounded-full bg-[#166534] ${isRefreshing ? "animate-spin" : "animate-pulse"}`}></span>
+          <span
+            className={`w-2 h-2 rounded-full bg-[#166534] ${isRefreshing ? "animate-spin" : "animate-pulse"}`}
+          ></span>
           <span className="text-[11px] font-medium text-[#58605b]">
-            SYNC: <span className="font-semibold text-[#202522]">{lastSyncTime || currentTime}</span>
+            SYNC:{" "}
+            <span className="font-semibold text-[#202522]">
+              {lastSyncTime || currentTime}
+            </span>
           </span>
         </button>
 
@@ -129,7 +167,9 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
           className="flex items-center space-x-1.5 bg-[#f9faf8] hover:bg-[#edeeec] border border-[#D9DDD8] text-[#202522] px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-colors cursor-pointer"
           title="AI Retail Operations Advisor"
         >
-          <span className="material-symbols-outlined text-[16px] text-[#166534]">smart_toy</span>
+          <span className="material-symbols-outlined text-[16px] text-[#166534]">
+            smart_toy
+          </span>
           <span className="hidden sm:inline">AI Advisor</span>
         </button>
 
@@ -140,7 +180,9 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
           className="relative p-1.5 text-[#58605b] hover:text-[#202522] hover:bg-[#f9faf8] rounded-md transition-colors cursor-pointer"
           aria-label="View alerts"
         >
-          <span className="material-symbols-outlined text-[22px]">notifications</span>
+          <span className="material-symbols-outlined text-[22px]">
+            notifications
+          </span>
           {totalAlerts > 0 && (
             <span className="absolute top-1 right-1 w-4 h-4 bg-[#991B1B] text-white text-[9px] font-bold flex items-center justify-center rounded-full">
               {totalAlerts}
@@ -158,8 +200,12 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
             SM
           </div>
           <div className="hidden xl:block text-left">
-            <div className="text-[12px] font-bold text-[#202522] leading-tight">Store Manager</div>
-            <div className="text-[10px] text-[#58605b]">Staff ID #92841</div>
+            <div className="text-[12px] font-bold text-[#202522] leading-tight">
+              Store Manager
+            </div>
+            <div className="text-[10px] text-[#58605b]">
+              Local operations user
+            </div>
           </div>
         </div>
       </div>

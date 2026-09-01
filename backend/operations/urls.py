@@ -1,9 +1,16 @@
 from django.urls import path
 
-from . import views
+from . import ai_views, views
 
 urlpatterns = [
     path("health/", views.health),
+    path("ai/health/", ai_views.ai_health),
+    path("ai/config/", ai_views.ai_config),
+    path("ai/vision-analysis/", ai_views.analyze_image),
+    path("ai/stock-analysis/", ai_views.analyze_stock_image),
+    path("ai/heatmap/", ai_views.heatmap),
+    path("ai/source/test/", ai_views.test_source),
+    path("sensors/events/", ai_views.sensor_event),
     path("overview/", views.overview),
     path("store/metrics", views.store_metrics),
     path("store/alerts/acknowledge", views.store_acknowledge_alert),
@@ -14,9 +21,12 @@ urlpatterns = [
     path("store/devices/register", views.register_dashboard_device),
     path("store/zones/add", views.add_dashboard_zone),
     path("store/settings", views.store_settings),
+    path("store/reports/generate", views.generate_report),
+    path("store/operational-advice", views.operational_advice),
     path("stores/", views.stores),
     path("zones/", views.zones),
     path("devices/", views.devices),
+    path("devices/<int:device_id>/health/", views.device_health),
     path("inventory/", views.inventory),
     path("queues/", views.queues),
     path("events/", views.events),

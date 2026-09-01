@@ -1,14 +1,19 @@
+import csv
 import json
+from datetime import date
+from pathlib import Path
 
+from django.conf import settings
 from django.db.models import Avg
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
 from .models import Alert, Device, InventoryItem, OperationalEvent, QueueCounter, Store, Zone
-from .dashboard import dashboard_payload, device_payload, inventory_item_payload, queue_payload
+from .dashboard import dashboard_payload, device_payload, inventory_item_payload, queue_payload, settings_payload
 
 
 def parse_body(request: HttpRequest) -> dict:
@@ -37,6 +42,15 @@ def device_data(device: Device) -> dict:
             "status": device.get_status_display(), "sourceUrl": device.source_url, "ipAddress": device.ip_address,
             "lastHeartbeat": device.last_heartbeat.isoformat() if device.last_heartbeat else None,
             "metadata": device.metadata}
+
+
+@require_GET
+def device_health(request: HttpRequest, device_id: int) -> JsonResponse:
+    device = get_object_or_404(Device, id=device_id)
+    heartbeat_age_ms = None
+    if device.last_heartbeat:
+        heartbeat_age_ms = max(round((timezone.now() - device.last_heartbeat).total_seconds() * 1000), 0)
+    return JsonResponse({"id": str(device.id), "status": device.get_status_display(), "heartbeatAgeMs": heartbeat_age_ms})
 
 
 def inventory_data(item: InventoryItem) -> dict:
@@ -154,8 +168,10 @@ def add_dashboard_zone(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def store_settings(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse(settings_payload(Store.objects.first()))
     try:
         data = parse_body(request)
         profile = data["profile"]
@@ -175,6 +191,62 @@ def store_settings(request: HttpRequest) -> JsonResponse:
     except (KeyError, ValueError) as error:
         return bad_request(str(error))
     return JsonResponse({"success": True, "store": store_data(store)})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def generate_report(request: HttpRequest) -> JsonResponse:
+    try:
+        data = parse_body(request)
+        store = Store.objects.get(id=data["storeId"]) if data.get("storeId") else Store.objects.first()
+        if store is None:
+            return bad_request("Create a store before generating a report.")
+        start = date.fromisoformat(data["dateStart"])
+        end = date.fromisoformat(data["dateEnd"])
+        if end < start:
+            return bad_request("dateEnd must be on or after dateStart.")
+    except (KeyError, Store.DoesNotExist, ValueError) as error:
+        return bad_request(str(error))
+
+    report_type = str(data.get("reportType", "Store Performance"))
+    reports_dir = Path(settings.BASE_DIR) / "generated_reports"
+    reports_dir.mkdir(exist_ok=True)
+    filename = f"{slugify(report_type) or 'store-report'}_{start}_{end}.csv"
+    report_path = reports_dir / filename
+    event_query = OperationalEvent.objects.filter(store=store, occurred_at__date__range=(start, end)).select_related("zone")
+    zone_name = data.get("zone")
+    if zone_name and zone_name != "All Store Zones":
+        event_query = event_query.filter(zone__name=zone_name)
+    with report_path.open("w", newline="", encoding="utf-8") as report_file:
+        writer = csv.writer(report_file)
+        writer.writerow(["timestamp", "event_type", "zone", "value", "confidence"])
+        for event in event_query.order_by("occurred_at"):
+            writer.writerow([event.occurred_at.isoformat(), event.event_type, event.zone.name if event.zone else "", event.value if event.value is not None else "", event.confidence if event.confidence is not None else ""])
+    size = report_path.stat().st_size
+    report_event = OperationalEvent.objects.create(store=store, event_type="report_generated", payload={"filename": filename, "fileSize": f"{size} B", "type": "CSV", "path": str(report_path.relative_to(settings.BASE_DIR))}, occurred_at=timezone.now())
+    return JsonResponse({"success": True, "report": {"id": str(report_event.id), "filename": filename, "dateStr": "Just now", "statusColor": "success", "fileSize": f"{size} B", "type": "CSV"}}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def operational_advice(request: HttpRequest) -> JsonResponse:
+    try:
+        query = str(parse_body(request).get("query", "")).strip().lower()
+    except ValueError as error:
+        return bad_request(str(error))
+    snapshot = dashboard_payload()
+    if "queue" in query or "checkout" in query:
+        queues = snapshot["queues"]
+        advice = f"Queue risk is {queues['predictedRisk']}. {queues['aiRecommendation']['description']}"
+    elif "stock" in query or "inventory" in query or "shelf" in query:
+        affected = [item for item in snapshot["inventory"]["shelfItems"] if item["status"] != "Optimal"]
+        advice = "No low-stock or out-of-stock items are currently recorded." if not affected else "Inventory attention required: " + ", ".join(f"{item['name']} ({item['status']})" for item in affected[:5]) + "."
+    elif "footfall" in query or "shopper" in query or "dwell" in query:
+        shoppers = snapshot["shoppers"]
+        advice = f"Today has {shoppers['totalEntries']} observed entries and {shoppers['totalExits']} exits. Average completed dwell is {shoppers['avgDwellMinutes']}m {shoppers['avgDwellSeconds']}s."
+    else:
+        advice = f"Current occupancy is {snapshot['metrics']['activeShoppers']}; {snapshot['alerts'].__len__()} alerts are recorded; queue risk is {snapshot['queues']['predictedRisk']}."
+    return JsonResponse({"advice": advice, "source": "local_store_telemetry"})
 
 
 @require_GET

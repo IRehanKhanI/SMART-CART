@@ -38,7 +38,9 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
               <span className="text-[12px] font-semibold uppercase tracking-wider text-[#58605b]">
                 Predicted Congestion Risk
               </span>
-              <span className="material-symbols-outlined text-[20px] text-[#B45309]">trending_up</span>
+              <span className="material-symbols-outlined text-[20px] text-[#B45309]">
+                trending_up
+              </span>
             </div>
 
             <div className="flex items-baseline space-x-2">
@@ -47,8 +49,8 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
                   data.predictedRisk === "HIGH"
                     ? "text-[#991B1B]"
                     : data.predictedRisk === "MEDIUM"
-                    ? "text-[#B45309]"
-                    : "text-[#166534]"
+                      ? "text-[#B45309]"
+                      : "text-[#166534]"
                 }`}
               >
                 {data.predictedRisk}
@@ -59,13 +61,14 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
             </div>
 
             <p className="text-[12px] text-[#58605b] mt-2 leading-relaxed">
-              Optical sensors detect 32 shoppers heading toward the front checkout area.
+              Risk is derived from the latest observed queue length and
+              configured counter capacity.
             </p>
           </div>
 
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 flex items-center justify-between text-[11px] text-[#58605b]">
-            <span>Model: Time-Series Queue ARIMA</span>
-            <span className="font-mono text-[#166534]">96.4% confidence</span>
+            <span>Method: deterministic queue threshold</span>
+            <span className="font-mono text-[#166534]">Local observations</span>
           </div>
         </div>
 
@@ -74,7 +77,9 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-1.5">
-                <span className="material-symbols-outlined text-[18px] text-[#166534]">smart_toy</span>
+                <span className="material-symbols-outlined text-[18px] text-[#166534]">
+                  smart_toy
+                </span>
                 <span className="text-[12px] font-bold uppercase tracking-wider text-[#202522]">
                   AI Recommendation
                 </span>
@@ -95,7 +100,9 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 flex items-center justify-between">
             {data.aiRecommendation.executed ? (
               <span className="text-[12px] font-bold text-[#166534] flex items-center gap-1">
-                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                <span className="material-symbols-outlined text-[16px]">
+                  check_circle
+                </span>
                 Counter 4 Activated (Congestion Resolving)
               </span>
             ) : (
@@ -104,7 +111,9 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
                 onClick={onExecuteRecommendation}
                 className="w-full py-2 bg-[#202522] hover:bg-black text-white text-[12px] font-bold rounded-md transition-colors flex items-center justify-center gap-1.5 shadow-xs"
               >
-                <span className="material-symbols-outlined text-[16px]">bolt</span>
+                <span className="material-symbols-outlined text-[16px]">
+                  bolt
+                </span>
                 Execute Recommendation
               </button>
             )}
@@ -144,7 +153,7 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
           </div>
 
           <div className="mt-4 pt-3 border-t border-[#D9DDD8]/60 text-[11px] text-[#58605b]">
-            Service throughput: 28 items / min average
+            Service time requires completed checkout or POS events
           </div>
         </div>
       </div>
@@ -153,11 +162,15 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
       <div className="bg-white border border-[#D9DDD8] rounded-lg shadow-xs overflow-hidden">
         <div className="p-4 border-b border-[#D9DDD8] flex items-center justify-between">
           <div>
-            <h3 className="text-[14px] font-bold text-[#202522]">Active Checkout Registers</h3>
-            <p className="text-[12px] text-[#58605b]">Real-time camera queue line tracking</p>
+            <h3 className="text-[14px] font-bold text-[#202522]">
+              Active Checkout Registers
+            </h3>
+            <p className="text-[12px] text-[#58605b]">
+              Real-time camera queue line tracking
+            </p>
           </div>
           <span className="text-[11px] font-mono text-[#58605b]">
-            4 total lanes configured
+            {data.counters.length} total lanes configured
           </span>
         </div>
 
@@ -180,7 +193,10 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
                 const qLen = counter.queueLength || 0;
 
                 return (
-                  <tr key={counter.id} className="hover:bg-[#f9faf8] transition-colors">
+                  <tr
+                    key={counter.id}
+                    className="hover:bg-[#f9faf8] transition-colors"
+                  >
                     <td className="py-3.5 px-4 font-mono font-bold text-[#202522]">
                       #0{counter.id}
                     </td>
@@ -203,20 +219,22 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
                           </div>
                           {/* Visual Dots Queue Representation */}
                           <div className="flex items-center space-x-1">
-                            {Array.from({ length: counter.capacity }).map((_, idx) => (
-                              <div
-                                key={idx}
-                                className={`h-2 flex-1 rounded-xs transition-colors ${
-                                  idx < qLen
-                                    ? counter.status === "Congested"
-                                      ? "bg-[#991B1B]"
-                                      : counter.status === "Elevated"
-                                      ? "bg-[#B45309]"
-                                      : "bg-[#166534]"
-                                    : "bg-[#edeeec]"
-                                }`}
-                              ></div>
-                            ))}
+                            {Array.from({ length: counter.capacity }).map(
+                              (_, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`h-2 flex-1 rounded-xs transition-colors ${
+                                    idx < qLen
+                                      ? counter.status === "Congested"
+                                        ? "bg-[#991B1B]"
+                                        : counter.status === "Elevated"
+                                          ? "bg-[#B45309]"
+                                          : "bg-[#166534]"
+                                      : "bg-[#edeeec]"
+                                  }`}
+                                ></div>
+                              ),
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -231,7 +249,7 @@ export const QueuesView: React.FC<QueuesViewProps> = ({
                     <td className="py-3.5 px-4">
                       <span
                         className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded border ${getStatusBadge(
-                          counter.status
+                          counter.status,
                         )}`}
                       >
                         {counter.status}

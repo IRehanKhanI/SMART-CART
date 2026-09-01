@@ -1,11 +1,6 @@
 {
   "name": "Retail Operations Command",
   "description": "AI-Powered Retail Intelligence Platform (SIH 26179) with real-time edge telemetry, shopper analytics, inventory visibility, queue intelligence, device fleet control, and edge-AI camera stream analysis.",
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
 }

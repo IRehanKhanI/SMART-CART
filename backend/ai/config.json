@@ -1,0 +1,19 @@
+{
+  "confidence": 0.35,
+  "entryLine": [
+    [0.0, 0.55],
+    [1.0, 0.55]
+  ],
+  "queue": {
+    "polygon": [
+      [0.0, 0.0],
+      [1.0, 0.0],
+      [1.0, 1.0],
+      [0.0, 1.0]
+    ],
+    "threshold": 6,
+    "serviceMinutes": 2.0
+  },
+  "zones": [],
+  "shelves": []
+}
