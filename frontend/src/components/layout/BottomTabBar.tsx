@@ -17,13 +17,13 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({
 }) => {
   const mainTabs: { id: TabType; label: string; icon: string; isAi?: boolean }[] = [
     { id: "overview", label: "Overview", icon: "dashboard" },
+    { id: "cart", label: "Cart", icon: "shopping_cart" },
     { id: "shoppers", label: "Shoppers", icon: "group" },
-    { id: "queues", label: "Queues", icon: "hourglass_top" },
     { id: "inventory", label: "Inventory", icon: "inventory_2" },
     { id: "camera", label: "AI Vision", icon: "videocam", isAi: true },
   ];
 
-  const isMoreActive = ["analytics", "devices", "settings"].includes(currentTab);
+  const isMoreActive = ["queues", "analytics", "devices", "settings"].includes(currentTab);
 
   return (
     <nav

@@ -11,6 +11,7 @@ import { AnalyticsView } from "./components/views/AnalyticsView";
 import { DevicesView } from "./components/views/DevicesView";
 import { SettingsView } from "./components/views/SettingsView";
 import { EdgeCameraView } from "./components/views/EdgeCameraView";
+import { SmartCartView } from "./components/views/SmartCartView";
 
 import { ManualTaskModal } from "./components/modals/ManualTaskModal";
 import { RegisterDeviceModal } from "./components/modals/RegisterDeviceModal";
@@ -363,6 +364,10 @@ export default function App() {
                     onDispatchRestock={handleDispatchItem}
                     onAcknowledgeAlert={handleAcknowledgeAlert}
                   />
+                )}
+
+                {activeTab === "cart" && (
+                  <SmartCartView djangoApiBase={djangoApiBase} />
                 )}
 
                 {activeTab === "shoppers" && (

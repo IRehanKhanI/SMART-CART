@@ -6,9 +6,89 @@ export type TabType =
   | "analytics"
   | "devices"
   | "settings"
-  | "camera";
+  | "camera"
+  | "cart";
 
 export type NavigationTab = TabType;
+
+export interface MemberData {
+  id: number;
+  memberId: string;
+  name: string;
+  phone: string;
+  email: string;
+  tier: "Bronze" | "Silver" | "Gold" | "Platinum";
+  discountPercent: number;
+  loyaltyPoints: number;
+  ordersCount?: number;
+  totalSpent?: number;
+  createdAt?: string;
+}
+
+export interface CartItemData {
+  id: number;
+  productId: number;
+  sku: string;
+  name: string;
+  category: string;
+  price: number;
+  quantity: number;
+  lineTotal: number;
+  shelfLocation: string;
+  imageUrl?: string;
+}
+
+export interface RecommendationItem {
+  id: number;
+  sku: string;
+  name: string;
+  category: string;
+  price: number;
+  imageUrl?: string;
+  shelfLocation?: string;
+  reason: string;
+  badge: string;
+  provenance: string;
+  score: number;
+}
+
+export interface CartRecommendationsPayload {
+  mode: string;
+  modeLabel: string;
+  recommendations: RecommendationItem[];
+  basedOnItems: string[];
+  memberId: string | null;
+  memberName: string;
+}
+
+export interface OledDisplayLines {
+  line1: string;
+  line2: string;
+  line3: string;
+  line4: string;
+  formatted: string[];
+}
+
+export interface CartSessionData {
+  cartId: string;
+  status: string;
+  isGuest: boolean;
+  member: MemberData | null;
+  items: CartItemData[];
+  itemCount: number;
+  subtotal: number;
+  discountAmount: number;
+  discountPercent: number;
+  total: number;
+  recommendations: CartRecommendationsPayload;
+  oled: OledDisplayLines;
+  lastScanned?: {
+    sku: string;
+    name: string;
+    price: number;
+    isNew: boolean;
+  };
+}
 
 export interface OverviewMetrics {
   currentOccupancy: number;

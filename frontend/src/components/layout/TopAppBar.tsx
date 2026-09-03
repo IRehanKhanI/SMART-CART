@@ -59,6 +59,10 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
       title: "Command Center Overview",
       subtitle: "Real-time edge telemetry and store operational summary",
     },
+    cart: {
+      title: "Smart Cart & AI Recommendation Command",
+      subtitle: "ESP32-CAM vision scanning, 1.3\" OLED telemetry & customer membership",
+    },
     shoppers: {
       title: "Shopper Analytics",
       subtitle: "Footfall trend, dwell duration and zone heatmaps",

@@ -38,6 +38,7 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
     badge?: number;
   }[] = [
     { id: "overview", label: "Overview", icon: "dashboard" },
+    { id: "cart", label: "Smart Cart", icon: "shopping_cart" },
     { id: "shoppers", label: "Shoppers", icon: "group" },
     { id: "inventory", label: "Inventory", icon: "inventory_2" },
     { id: "queues", label: "Queues", icon: "hourglass_top" },
