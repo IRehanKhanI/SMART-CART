@@ -77,9 +77,7 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
                 <h1 className="text-[14px] font-bold tracking-tight text-[#202522] uppercase">
                   Retail Intelligence
                 </h1>
-                <p className="text-[11px] text-[#58605b] font-medium">
-                  SIH-26179 • Edge Command
-                </p>
+               
               </div>
             </div>
             <button
@@ -192,9 +190,7 @@ export const SideNavBar: React.FC<SideNavBarProps> = ({
               </span>
             </div>
           </div>
-          <div className="text-[11px] text-[#58605b] mt-1">
-            Django + SQLite edge store
-          </div>
+          
         </div>
       </aside>
     </>

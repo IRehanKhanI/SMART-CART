@@ -495,9 +495,7 @@ export const EdgeCameraView: React.FC<EdgeCameraViewProps> = ({
                 </span>
                 Computer Vision Metrics
               </h4>
-              <span className="text-[10px] font-mono bg-[#166534]/10 text-[#166534] px-1.5 py-0.5 rounded font-bold">
-                YOLO26n + ByteTrack
-              </span>
+            
             </div>
 
             {stockResult ? (

@@ -1,7 +1,6 @@
 /**
  * ============================================================================
  * AI-POWERED SMART CART - STANDARD ESP32 FIRMWARE
- * (Updated from ESP32-CAM to Standard ESP32: OLED, INMP441 Mic, Mobile Sync)
  * ============================================================================
  * Hardware Pin Mapping for Standard ESP32 (ESP32 DevKit V1 / 30-pin / 38-pin):
  *
@@ -87,6 +86,7 @@ enum DisplayMode {
   MODE_MESSAGE         // Temporary status popup
 };
 
+// Maximum items in voice search results
 #define MAX_SEARCH_ITEMS 5
 
 struct SearchItem {
@@ -218,10 +218,11 @@ bool initI2SMic() {
   return (err == ESP_OK);
 }
 
+// Standard 44-byte WAV header generator
 void createWavHeader(byte* header, int totalDataLen) {
   int totalFileLen = totalDataLen + 36;
   int sampleRate = MIC_SAMPLE_RATE;
-  int byteRate = sampleRate * 1 * 2;
+  int byteRate = sampleRate * 1 * 2; // mono 16-bit
 
   // RIFF Header
   header[0] = 'R'; header[1] = 'I'; header[2] = 'F'; header[3] = 'F';
@@ -234,8 +235,8 @@ void createWavHeader(byte* header, int totalDataLen) {
   // "fmt " Chunk
   header[12] = 'f'; header[13] = 'm'; header[14] = 't'; header[15] = ' ';
   header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0;
-  header[20] = 1; header[21] = 0;
-  header[22] = 1; header[23] = 0;
+  header[20] = 1; header[21] = 0;   // PCM format
+  header[22] = 1; header[23] = 0;   // Mono channel
   header[24] = (byte)(sampleRate & 0xFF);
   header[25] = (byte)((sampleRate >> 8) & 0xFF);
   header[26] = (byte)((sampleRate >> 16) & 0xFF);
@@ -244,8 +245,8 @@ void createWavHeader(byte* header, int totalDataLen) {
   header[29] = (byte)((byteRate >> 8) & 0xFF);
   header[30] = (byte)((byteRate >> 16) & 0xFF);
   header[31] = (byte)((byteRate >> 24) & 0xFF);
-  header[32] = 2; header[33] = 0;
-  header[34] = 16; header[35] = 0;
+  header[32] = 2; header[33] = 0;   // Block align (1 channel * 2 bytes)
+  header[34] = 16; header[35] = 0;  // 16 bits per sample
 
   // "data" Chunk
   header[36] = 'd'; header[37] = 'a'; header[38] = 't'; header[39] = 'a';
@@ -261,7 +262,11 @@ void createWavHeader(byte* header, int totalDataLen) {
 void renderOLED() {
   u8g2.clearBuffer();
 
+  // ----------------------------------------------------------
+  // MODE 1: CART PAIRING QR CODE (SHOWN ON STARTUP & IDLE)
+  // ----------------------------------------------------------
   if (currentMode == MODE_PAIRING_QR) {
+    // Left column: Instructions & Cart ID
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 10, CART_ID);
 
@@ -272,6 +277,7 @@ void renderOLED() {
     u8g2.drawStr(2, 54, "HOLD BACK:");
     u8g2.drawStr(2, 62, "MIC SEARCH");
 
+    // Right column: Render 21x21 QR Code at 2x Scale (42x42 pixels)
     int scale = 2;
     int qrPixelWidth = 21 * scale;
     int startX = 128 - qrPixelWidth - 4;
@@ -286,6 +292,9 @@ void renderOLED() {
       }
     }
 
+  // ----------------------------------------------------------
+  // MODE 2: VOICE RECORDING / LISTENING
+  // ----------------------------------------------------------
   } else if (currentMode == MODE_VOICE_LISTENING) {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
@@ -303,6 +312,9 @@ void renderOLED() {
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(4, 60, "e.g. 'Milk', 'Parle-G', 'Coke'");
 
+  // ----------------------------------------------------------
+  // MODE 3: SEARCH RESULTS (ROWS WITH CURSOR)
+  // ----------------------------------------------------------
   } else if (currentMode == MODE_SEARCH_RESULTS) {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
@@ -311,6 +323,7 @@ void renderOLED() {
     u8g2.drawStr(2, 9, header.c_str());
     u8g2.setDrawColor(1);
 
+    // Display rows of items
     u8g2.setFont(u8g2_font_5x8_tf);
     int startIdx = 0;
     if (displayState.selectedSearchIndex >= 3) {
@@ -335,6 +348,9 @@ void renderOLED() {
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 62, "FWD/BACK:MOVE | OK:VIEW LOC");
 
+  // ----------------------------------------------------------
+  // MODE 4: ITEM DIRECTION SCREEN
+  // ----------------------------------------------------------
   } else if (currentMode == MODE_ITEM_DIRECTION) {
     const SearchItem& item = displayState.searchResults[displayState.selectedSearchIndex];
 
@@ -344,13 +360,16 @@ void renderOLED() {
     u8g2.drawStr(2, 9, "ITEM DIRECTION");
     u8g2.setDrawColor(1);
 
+    // Item Name & Price
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 24, item.name.substring(0, 20).c_str());
 
+    // Price & Stock
     u8g2.setFont(u8g2_font_5x8_tf);
     String pStock = "Rs." + String((int)item.price) + " | Stock: " + String(item.stock) + " available";
     u8g2.drawStr(2, 34, pStock.c_str());
 
+    // Navigation direction in bold/prominent text
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 47, (">> " + item.shortDirection).substring(0, 20).c_str());
 
@@ -358,6 +377,9 @@ void renderOLED() {
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 61, "PRESS OK: BACK TO CART");
 
+  // ----------------------------------------------------------
+  // MODE 5: FINAL PRICE SCREEN (CHECKOUT STEP 1)
+  // ----------------------------------------------------------
   } else if (currentMode == MODE_FINAL_PRICE) {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
@@ -376,6 +398,9 @@ void renderOLED() {
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 60, ">> PRESS OK FOR UPI QR <<");
 
+  // ----------------------------------------------------------
+  // MODE 6: UPI PAYMENT QR CODE (CHECKOUT STEP 2)
+  // ----------------------------------------------------------
   } else if (currentMode == MODE_PAY_QR && displayState.hasQrCode) {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 10, "PAY NOW");
@@ -401,6 +426,9 @@ void renderOLED() {
       }
     }
 
+  // ----------------------------------------------------------
+  // MODE 7: NORMAL CART VIEW
+  // ----------------------------------------------------------
   } else {
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
@@ -408,12 +436,15 @@ void renderOLED() {
     u8g2.drawStr(2, 9, displayState.line1.c_str());
     u8g2.setDrawColor(1);
 
+    // Line 2: Last scanned item & price
     u8g2.setFont(u8g2_font_7x14B_tf);
     u8g2.drawStr(2, 27, displayState.line2.c_str());
 
+    // Line 3: Cart total & item count
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 43, displayState.line3.c_str());
 
+    // Line 4: Recommendations Ticker
     u8g2.drawHLine(0, 48, 128);
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 60, displayState.line4.c_str());
@@ -438,6 +469,7 @@ void showMessage(const char* title, const char* msg) {
 // 7. BACKEND HTTP API CLIENT
 // ==========================================
 
+// 1. Fetch Cart OLED Status from Django
 void fetchCartOledStatus() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -462,6 +494,7 @@ void fetchCartOledStatus() {
       displayState.itemCount = doc["count"] | displayState.itemCount;
       displayState.isPaired = doc["is_paired"] | false;
 
+      // If user was on pairing screen and app paired, auto-switch to cart mode!
       if (currentMode == MODE_PAIRING_QR && displayState.isPaired) {
         currentMode = MODE_CART;
         Serial.println("[Smart Cart]: Mobile app paired! Switching to Cart mode.");
@@ -475,6 +508,7 @@ void fetchCartOledStatus() {
   http.end();
 }
 
+// 2. Fetch Pairing QR from backend
 void fetchPairingQR() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -505,12 +539,14 @@ void fetchPairingQR() {
   http.end();
 }
 
+// 3. Record Audio from INMP441 Microphone & Perform Item Voice Search
 void recordAndSearchVoice() {
   currentMode = MODE_VOICE_LISTENING;
   renderOLED();
 
   Serial.println("[Voice Search]: Starting 3-second recording from INMP441 mic...");
 
+  // Allocate 16-bit PCM buffer (16000 samples * 2 bytes = 32KB per sec -> 96KB for 3s)
   int samplesToRead = MIC_SAMPLE_RATE * MIC_RECORD_SECS;
   int bytesToRead = samplesToRead * sizeof(int16_t);
   int16_t *pcmBuffer = (int16_t *)malloc(bytesToRead);
@@ -537,6 +573,7 @@ void recordAndSearchVoice() {
 
   showMessage("VOICE SEARCH", "SEARCHING ITEMS...");
 
+  // Build WAV Payload (44 bytes header + PCM data)
   int wavLen = 44 + bytesRead;
   uint8_t *wavPayload = (uint8_t *)malloc(wavLen);
 
@@ -553,6 +590,7 @@ void recordAndSearchVoice() {
   memcpy(wavPayload + 44, pcmBuffer, bytesRead);
   free(pcmBuffer);
 
+  // Send Audio over Wi-Fi to Django voice search endpoint
   HTTPClient http;
   String url = String(SERVER_BASE_URL) + "/api/cart/voice-search/?cart_id=" + String(CART_ID);
   http.begin(url);
@@ -632,6 +670,7 @@ void recordAndSearchVoice() {
   http.end();
 }
 
+// 4. Fetch Payment QR & Show FINAL PRICE
 void fetchPaymentQRAndShowPrice() {
   showMessage("CHECKOUT", "CALCULATING PRICE...");
 
@@ -669,6 +708,7 @@ void fetchPaymentQRAndShowPrice() {
     }
     displayState.hasQrCode = (rIdx > 0);
 
+    // Transition to FINAL PRICE screen!
     currentMode = MODE_FINAL_PRICE;
     renderOLED();
     Serial.printf("Final Price: Rs.%.2f | Press OK for QR code.\n", displayState.finalPayAmount);
@@ -682,6 +722,7 @@ void fetchPaymentQRAndShowPrice() {
   http.end();
 }
 
+// 5. Pay & Checkout Completion
 void checkoutAndPay() {
   currentMode = MODE_CART;
   showMessage("PAYMENT", "CONFIRMING PAY...");
@@ -707,6 +748,7 @@ void checkoutAndPay() {
     String orderId = doc["orderId"] | "PAID";
     float amt = doc["totalPaid"] | displayState.finalPayAmount;
 
+    // Light up LED to signal payment & order completion!
     digitalWrite(BOUGHT_LED_PIN, HIGH);
 
     displayState.line1 = "PAID SUCCESSFUL!";
@@ -720,6 +762,7 @@ void checkoutAndPay() {
     delay(2500);
     digitalWrite(BOUGHT_LED_PIN, LOW);
 
+    // Reset back to pairing screen for next shopper
     currentMode = MODE_PAIRING_QR;
     fetchCartOledStatus();
     renderOLED();
@@ -736,6 +779,7 @@ void checkoutAndPay() {
 // 8. SETUP & MAIN LOOP
 // ==========================================
 void setup() {
+  // Disable brownout detector
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
   Serial.begin(115200);
@@ -744,26 +788,32 @@ void setup() {
   Serial.println("  GREENLOOP AI SMART CART - STANDARD ESP32 FIRMWARE");
   Serial.println("==================================================");
 
+  // 1. Initialize Buttons (GPIO 18, 19, 4)
   pinMode(BTN_FORWARD_PIN, INPUT_PULLUP);
   pinMode(BTN_BACKWARD_PIN, INPUT_PULLUP);
   pinMode(BTN_OK_PIN, INPUT_PULLUP);
 
+  // 2. Initialize Bought Indicator LED
   pinMode(BOUGHT_LED_PIN, OUTPUT);
   digitalWrite(BOUGHT_LED_PIN, LOW);
 
+  // 3. Initialize 1.3" I2C OLED Display
   u8g2.begin();
   showMessage("SMART CART 1.3\"", "STARTING UP...");
   delay(500);
 
+  // Show Cart Pairing QR Code right away on boot!
   currentMode = MODE_PAIRING_QR;
   renderOLED();
 
+  // 4. Initialize INMP441 I2S Microphone
   if (initI2SMic()) {
     Serial.println("[Mic]: INMP441 I2S Microphone Initialized (SCK=14, WS=15, SD=32).");
   } else {
     Serial.println("[Mic Error]: INMP441 Microphone initialization failed.");
   }
 
+  // 5. Connect to Wi-Fi
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi: ");
@@ -790,6 +840,7 @@ void setup() {
     Serial.printf(">> ESP32 IP: %s\n", displayState.ipStr.c_str());
     Serial.printf(">> BACKEND URL: %s\n", serverBaseUrl.c_str());
     
+    // Fetch live pairing QR matrix from backend
     fetchPairingQR();
     fetchCartOledStatus();
   } else {
@@ -799,8 +850,23 @@ void setup() {
 }
 
 void loop() {
+  // -------------------------------------------------------------
+  // 1. BUTTON OK (GPIO 4):
+  //    - In MODE_PAIRING_QR:
+  //        * Click: Switch to Cart mode directly (or test)
+  //    - In MODE_CART:
+  //        * Long Press (>= 1.2s): Show FINAL PRICE before QR
+  //    - In MODE_SEARCH_RESULTS:
+  //        * Click: Select highlighted item -> Show ITEM DIRECTION!
+  //    - In MODE_ITEM_DIRECTION:
+  //        * Click: Return to Cart mode
+  //    - In MODE_FINAL_PRICE:
+  //        * Click: Generate & Show UPI QR CODE!
+  //    - In MODE_PAY_QR:
+  //        * Click once paid: Complete Checkout
+  // -------------------------------------------------------------
   if (digitalRead(BTN_OK_PIN) == LOW) {
-    delay(40);
+    delay(40); // Debounce
     if (digitalRead(BTN_OK_PIN) == LOW) {
       unsigned long pressStart = millis();
 
@@ -814,10 +880,12 @@ void loop() {
       unsigned long duration = millis() - pressStart;
 
       if (currentMode == MODE_PAIRING_QR) {
+        // Toggle to cart mode
         currentMode = MODE_CART;
         renderOLED();
 
       } else if (currentMode == MODE_SEARCH_RESULTS) {
+        // Shopper selected item from rows -> SHOW DIRECTION!
         Serial.printf("[Button OK]: Selected row %d -> Showing direction for %s\n",
           displayState.selectedSearchIndex,
           displayState.searchResults[displayState.selectedSearchIndex].name.c_str()
@@ -826,6 +894,7 @@ void loop() {
         renderOLED();
 
       } else if (currentMode == MODE_ITEM_DIRECTION) {
+        // Shopper confirmed direction -> return to cart
         currentMode = MODE_CART;
         renderOLED();
 
@@ -837,9 +906,12 @@ void loop() {
         checkoutAndPay();
 
       } else {
+        // In Normal Cart Mode
         if (duration >= 1200) {
+          // LONG PRESS -> Checkout & Final Price
           fetchPaymentQRAndShowPrice();
         } else {
+          // Short click: show QR pairing screen or cycle view
           currentMode = MODE_PAIRING_QR;
           renderOLED();
         }
@@ -847,10 +919,17 @@ void loop() {
     }
   }
 
+  // -------------------------------------------------------------
+  // 2. BUTTON FORWARD (GPIO 18):
+  //    - In MODE_SEARCH_RESULTS: Move cursor down through item rows!
+  //    - In MODE_CART: Cycle forward recommendations
+  //    - In MODE_FINAL_PRICE / MODE_PAY_QR: Cancel back to cart
+  // -------------------------------------------------------------
   if (digitalRead(BTN_FORWARD_PIN) == LOW) {
-    delay(40);
+    delay(40); // Debounce
     if (digitalRead(BTN_FORWARD_PIN) == LOW) {
       if (currentMode == MODE_SEARCH_RESULTS) {
+        // Move selection cursor down
         if (displayState.searchCount > 0) {
           displayState.selectedSearchIndex = (displayState.selectedSearchIndex + 1) % displayState.searchCount;
           renderOLED();
@@ -862,6 +941,7 @@ void loop() {
         currentMode = MODE_SEARCH_RESULTS;
         renderOLED();
       } else {
+        // Cycle recommendations
         if (displayState.recCount > 0) {
           displayState.activeRecIndex = (displayState.activeRecIndex + 1) % displayState.recCount;
           displayState.line4 = "REC: " + displayState.recList[displayState.activeRecIndex];
@@ -874,8 +954,15 @@ void loop() {
     }
   }
 
+  // -------------------------------------------------------------
+  // 3. BUTTON BACKWARD (GPIO 19):
+  //    - LONG PRESS (>= 1.0s): ACTIVATE MIC VOICE SEARCH!
+  //    - Short click in MODE_SEARCH_RESULTS: Move cursor up through rows!
+  //    - Short click in MODE_CART: Previous recommendation
+  //    - In MODE_FINAL_PRICE / MODE_PAY_QR: Cancel back to cart
+  // -------------------------------------------------------------
   if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
-    delay(40);
+    delay(40); // Debounce
     if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
       unsigned long backPressStart = millis();
 
@@ -889,11 +976,14 @@ void loop() {
       unsigned long backDuration = millis() - backPressStart;
 
       if (backDuration >= 1000) {
+        // LONG PRESS: Record voice with INMP441 mic and search items!
         Serial.println("[Button Backward Long Press]: Activating Voice Search Mic...");
         recordAndSearchVoice();
 
       } else {
+        // SHORT CLICK
         if (currentMode == MODE_SEARCH_RESULTS) {
+          // Move cursor up through rows
           if (displayState.searchCount > 0) {
             displayState.selectedSearchIndex = (displayState.selectedSearchIndex - 1 + displayState.searchCount) % displayState.searchCount;
             renderOLED();
@@ -905,6 +995,7 @@ void loop() {
           currentMode = MODE_CART;
           renderOLED();
         } else {
+          // Previous recommendation
           if (displayState.recCount > 0) {
             displayState.activeRecIndex = (displayState.activeRecIndex - 1 + displayState.recCount) % displayState.recCount;
             displayState.line4 = "REC: " + displayState.recList[displayState.activeRecIndex];
@@ -916,6 +1007,9 @@ void loop() {
     }
   }
 
+  // -------------------------------------------------------------
+  // 4. Periodic Status Poll (every 3s when in Cart or Pairing mode)
+  // -------------------------------------------------------------
   if ((currentMode == MODE_CART || currentMode == MODE_PAIRING_QR) && (millis() - lastStatusPoll > POLL_INTERVAL_MS)) {
     lastStatusPoll = millis();
     fetchCartOledStatus();

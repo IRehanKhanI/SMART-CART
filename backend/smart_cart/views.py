@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from decimal import Decimal
 from typing import Any, Dict
@@ -22,6 +23,12 @@ latest_scan_debug: Dict[str, Any] = {
     "method": None,
     "timestamp": None,
 }
+
+# In-memory store for active search results per cart (for ESP32 and App sync)
+cart_active_searches: Dict[str, Any] = {}
+# In-memory pairing flag per cart
+cart_paired_status: Dict[str, Any] = {}
+
 
 
 def parse_json_body(request: HttpRequest) -> dict:
@@ -518,7 +525,7 @@ def checkout_cart_view(request: HttpRequest) -> JsonResponse:
 @require_GET
 def oled_status_view(request: HttpRequest) -> JsonResponse:
     """
-    Lightweight endpoint specifically tailored for ESP32-CAM & 1.3" OLED:
+    Lightweight endpoint tailored for ESP32 & 1.3" OLED:
     Returns clean 4-line text buffer and raw metrics for fast parsing on microcontrollers.
     """
     cart_id = request.GET.get("cart_id") or "CART-01"
@@ -531,23 +538,32 @@ def oled_status_view(request: HttpRequest) -> JsonResponse:
     cart_products = [item.product for item in items]
     rec_payload = get_recommendations_for_cart(cart_products, member=cart.member, limit=2)
     rec_names = [r["name"].split()[0] for r in rec_payload["recommendations"][:2]]
-    rec_str = ", ".join(rec_names) if rec_names else "BREAD, EGGS"
+    rec_str = ", ".join(rec_names) if rec_names else "PARLE-G, COKE"
 
-    shopper_tag = (cart.member.name[:9].upper() if cart.member else "GUEST")
+    is_paired = cart_paired_status.get(cart_id, {}).get("is_paired", False)
+    shopper_tag = "PAIRED" if is_paired else (cart.member.name[:8].upper() if cart.member else "READY")
+    
     last_item = items[0] if items else None
-    line2 = f"+{last_item.product.name[:9]} ${last_item.product.price}" if last_item else "EMPTY CART"
+    line2 = f"+ {last_item.product.name[:8]} Rs.{int(last_item.product.price)}" if last_item else ("SCAN WITH PHONE" if is_paired else "READY TO SCAN")
+
+    # Check if there is an active search result for this cart
+    search_data = cart_active_searches.get(cart_id)
 
     return JsonResponse({
         "cart_id": cart.cart_id,
+        "is_paired": is_paired,
         "member": shopper_tag,
         "count": sum(i.quantity for i in items),
         "total": float(total),
         "recs": rec_names,
-        "line1": f"{cart.cart_id} [{shopper_tag}]",
-        "line2": line2,
-        "line3": f"TOT:${total:.2f} ({len(items)}items)",
-        "line4": f"REC: {rec_str}",
+        "line1": f"{cart.cart_id} [{shopper_tag}]"[:21],
+        "line2": line2[:21],
+        "line3": f"TOT: Rs.{total:.2f} ({len(items)} items)"[:21],
+        "line4": f"REC: {rec_str}"[:21],
+        "has_search": search_data is not None,
+        "search": search_data if search_data else None,
     })
+
 
 
 @csrf_exempt
@@ -626,31 +642,403 @@ def members_admin_view(request: HttpRequest) -> JsonResponse:
         }, status=201)
 
 
-@require_GET
-def products_list_view(request: HttpRequest) -> JsonResponse:
-    """Lists all available products in store inventory."""
-    products = Product.objects.all()
-    return JsonResponse({
-        "products": [
-            {
-                "id": p.id,
-                "sku": p.sku,
-                "name": p.name,
-                "category": p.category,
-                "price": float(p.price),
-                "barcode": p.barcode,
-                "imageUrl": p.image_url,
-                "shelfLocation": p.shelf_location,
-                "currentStock": p.current_stock,
-            }
-            for p in products
-        ]
-    })
-
-
 def models_Q(*args, **kwargs):
     from django.db.models import Q
     return Q(*args, **kwargs)
+
+
+def get_item_direction(shelf_location: str, product_name: str = "") -> dict:
+    """
+    Translates shelf locations into store directions and OLED-friendly strings.
+    """
+    loc = (shelf_location or "").strip()
+    loc_lower = loc.lower()
+    
+    arrow = "STRAIGHT"
+    short_dir = "Aisle 1"
+    full_dir = f"Located at {loc}"
+
+    if "dairy" in loc_lower or "chiller" in loc_lower or "fridge" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Turn Right -> Dairy"
+        full_dir = f"Walk straight, turn RIGHT into Dairy Chiller ({loc})"
+    elif "biscuit" in loc_lower or "cookie" in loc_lower:
+        arrow = "LEFT"
+        short_dir = "Turn Left -> Aisle 2"
+        full_dir = f"Take Aisle 2 on the LEFT, Biscuit & Cookie Rack ({loc})"
+    elif "beverage" in loc_lower or "coke" in loc_lower or "drink" in loc_lower:
+        arrow = "STRAIGHT"
+        short_dir = "Ahead -> Cold Drinks"
+        full_dir = f"Walk straight 5m to Glass Cold Drinks Chiller ({loc})"
+    elif "flour" in loc_lower or "atta" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 1 -> Flour Bay"
+        full_dir = f"Aisle 1 on RIGHT, Lower Flour Bay ({loc})"
+    elif "confectionery" in loc_lower or "checkout" in loc_lower:
+        arrow = "FRONT"
+        short_dir = "Front -> Checkout"
+        full_dir = f"Near Front Billing Counters ({loc})"
+    elif "dental" in loc_lower or "paste" in loc_lower or "care" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 6 -> Dental"
+        full_dir = f"Walk to Aisle 6 Far Right, Dental Care ({loc})"
+    elif "tea" in loc_lower or "coffee" in loc_lower:
+        arrow = "LEFT"
+        short_dir = "Aisle 4 -> Beverages"
+        full_dir = f"Aisle 4 on the LEFT, Tea & Coffee Bay ({loc})"
+    elif "honey" in loc_lower or "spread" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 5 -> Spreads"
+        full_dir = f"Aisle 5 on the RIGHT, Honey & Spreads Shelf ({loc})"
+    elif "snack" in loc_lower or "noodle" in loc_lower or "maggi" in loc_lower:
+        arrow = "LEFT"
+        short_dir = "Aisle 3 -> Snacks"
+        full_dir = f"Aisle 3 on the LEFT, Snacks & Instant Foods ({loc})"
+    elif "aisle 1" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 1 Shelf A"
+        full_dir = f"Aisle 1 on your RIGHT ({loc})"
+    elif "aisle 2" in loc_lower:
+        arrow = "LEFT"
+        short_dir = "Aisle 2 Shelf B"
+        full_dir = f"Aisle 2 on your LEFT ({loc})"
+    elif "aisle 3" in loc_lower:
+        arrow = "LEFT"
+        short_dir = "Aisle 3 Middle"
+        full_dir = f"Aisle 3 on your LEFT ({loc})"
+    elif "aisle 4" in loc_lower:
+        arrow = "STRAIGHT"
+        short_dir = "Aisle 4 Shelf 3"
+        full_dir = f"Aisle 4 straight ahead ({loc})"
+    elif "aisle 5" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 5 Shelf 2"
+        full_dir = f"Aisle 5 on your RIGHT ({loc})"
+    elif "aisle 6" in loc_lower:
+        arrow = "RIGHT"
+        short_dir = "Aisle 6 Far End"
+        full_dir = f"Aisle 6 on your RIGHT ({loc})"
+    else:
+        arrow = "STRAIGHT"
+        short_dir = (loc[:18] if loc else "Main Floor")
+        full_dir = f"Located at {loc or 'Main Floor'}"
+
+    return {
+        "shelfLocation": loc or "Main Floor",
+        "direction": full_dir,
+        "shortDirection": short_dir[:20],
+        "arrow": arrow,
+    }
+
+
+@require_GET
+def pairing_qr_view(request: HttpRequest) -> JsonResponse:
+    """
+    Generates Cart Pairing QR Code for 1.3" OLED rendering and Mobile App pairing.
+    """
+    import base64
+    from io import BytesIO
+    import qrcode
+
+    cart_id = request.GET.get("cart_id") or "CART-01"
+    pairing_code = f"CART:{cart_id}"
+
+    qr = qrcode.QRCode(
+        box_size=1,
+        border=0,
+        error_correction=qrcode.constants.ERROR_CORRECT_L
+    )
+    qr.add_data(pairing_code)
+    qr.make(fit=True)
+    matrix = qr.get_matrix()
+    matrix_rows = ["".join("1" if cell else "0" for cell in row) for row in matrix]
+
+    img_qr = qrcode.make(pairing_code)
+    buf = BytesIO()
+    img_qr.save(buf, format="PNG")
+    b64_png = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    return JsonResponse({
+        "cartId": cart_id,
+        "pairingCode": pairing_code,
+        "qrSize": len(matrix),
+        "qrMatrix": matrix_rows,
+        "qrPngBase64": f"data:image/png;base64,{b64_png}",
+        "oled": {
+            "line1": f"{cart_id} [PAIR APP]",
+            "line2": "SCAN QR WITH APP",
+            "line3": "GREENLOOP SMART CART",
+            "line4": "MIC: VOICE SEARCH",
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def cart_pair_view(request: HttpRequest) -> JsonResponse:
+    """
+    Pairs the mobile app to the smart cart session.
+    """
+    cart_id = request.GET.get("cart_id")
+    data = {}
+    if request.body:
+        try:
+            data = parse_json_body(request)
+        except Exception:
+            pass
+    if not cart_id:
+        cart_id = data.get("cart_id") or "CART-01"
+
+    cart = get_or_create_cart(cart_id)
+    shopper_name = data.get("user_name") or data.get("shopper") or "APP-USER"
+    
+    cart_paired_status[cart_id] = {
+        "is_paired": True,
+        "paired_at": timezone.now().isoformat(),
+        "shopper_name": shopper_name,
+    }
+
+    return JsonResponse({
+        "status": "paired",
+        "cartId": cart.cart_id,
+        "shopper": shopper_name,
+        "message": f"Successfully paired with {cart.cart_id}!",
+        "oled": {
+            "line1": f"{cart.cart_id} [PAIRED]",
+            "line2": "PHONE SYNC ACTIVE",
+            "line3": "READY TO SCAN ITEMS",
+            "line4": "MIC: SEARCH ITEMS",
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def voice_search_view(request: HttpRequest) -> JsonResponse:
+    """
+    Intelligent Item Voice & Text Search for ESP32 and Mobile App.
+    Accepts:
+    1. Audio WAV file from INMP441 mic (request.FILES['audio'] or body)
+    2. OR query string/body text: ?query=milk or {"query": "chips"}
+    
+    Searches available products (current_stock > 0), computes directions,
+    and formats OLED rows for 1.3" display.
+    """
+    cart_id = request.GET.get("cart_id") or "CART-01"
+    
+    transcript = ""
+    audio_file = request.FILES.get("audio") or request.FILES.get("voice")
+    
+    if audio_file:
+        from .voice import transcribe_and_reply
+        audio_bytes = audio_file.read()
+        res = transcribe_and_reply(audio_bytes, cart_id=cart_id)
+        transcript = res.get("transcript", "").strip()
+    elif request.content_type in ["audio/wav", "audio/x-wav", "application/octet-stream"] and request.body:
+        from .voice import transcribe_and_reply
+        res = transcribe_and_reply(request.body, cart_id=cart_id)
+        transcript = res.get("transcript", "").strip()
+    else:
+        data = {}
+        if request.body:
+            try:
+                data = parse_json_body(request)
+            except Exception:
+                pass
+        transcript = data.get("query") or data.get("text") or request.GET.get("query") or request.GET.get("text") or ""
+
+    clean_query = transcript.lower().strip()
+    stopwords = {"where", "is", "the", "can", "i", "find", "do", "you", "have", "show", "me", "please", "search", "for", "item", "product", "items", "a", "an", "at", "in", "what"}
+    words = [w for w in re.findall(r'\b[a-zA-Z0-9]+\b', clean_query) if w not in stopwords and len(w) > 1]
+
+    all_prods = Product.objects.filter(current_stock__gt=0)
+    matched_prods = []
+    
+    if words:
+        for p in all_prods:
+            p_name = p.name.lower()
+            p_cat = p.category.lower()
+            p_sku = p.sku.lower()
+            score = 0
+            for w in words:
+                if w in p_name:
+                    score += 3
+                elif w in p_cat:
+                    score += 2
+                elif w in p_sku:
+                    score += 1
+            if score > 0:
+                matched_prods.append((score, p))
+        matched_prods.sort(key=lambda x: x[0], reverse=True)
+        results = [p for _, p in matched_prods[:6]]
+    else:
+        # Fallback to popular available items
+        results = list(all_prods[:4])
+
+    item_rows = []
+    oled_rows = []
+    for idx, p in enumerate(results):
+        direction_info = get_item_direction(p.shelf_location, p.name)
+        short_name = p.name.split('(')[0].strip()
+        if len(short_name) > 10:
+            short_name = short_name[:10]
+        oled_row = f"{idx+1}.{short_name} Rs{int(p.price)}"[:21]
+        oled_rows.append(oled_row)
+        
+        item_rows.append({
+            "id": p.id,
+            "sku": p.sku,
+            "barcode": p.barcode or p.sku,
+            "name": p.name,
+            "category": p.category,
+            "price": float(p.price),
+            "stock": p.current_stock,
+            "shelfLocation": p.shelf_location,
+            "direction": direction_info["direction"],
+            "shortDirection": direction_info["shortDirection"],
+            "arrow": direction_info["arrow"],
+            "imageUrl": p.image_url,
+            "oledRow": oled_row,
+            "oledText": oled_row,
+        })
+    
+    cart_active_searches[cart_id] = {
+        "transcript": transcript,
+        "items": item_rows,
+        "oled_rows": oled_rows,
+        "timestamp": timezone.now().isoformat(),
+        "selected_index": 0,
+    }
+
+    header_text = f"FOUND: {transcript.upper()[:9]} ({len(item_rows)})" if transcript else f"AVAILABLE ITEMS ({len(item_rows)})"
+
+    return JsonResponse({
+        "status": "success",
+        "cartId": cart_id,
+        "transcript": transcript or "Available Items",
+        "totalFound": len(item_rows),
+        "count": len(item_rows),
+        "items": item_rows,
+        "results": item_rows,
+        "oled": {
+            "mode": "SEARCH_RESULTS",
+            "header": header_text[:21],
+            "rows": oled_rows,
+            "selectedIndex": 0,
+            "hint": "FWD/BACK:MOVE | OK:DIR",
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def products_api_view(request: HttpRequest) -> JsonResponse:
+    """
+    CRUD Endpoint for products supporting both dictionary keyed by barcode
+    (for mobile app productDb.ts) and array list (for frontend dashboards).
+    """
+    if request.method == "GET":
+        prods = Product.objects.all()
+        results_map = {}
+        prod_list = []
+        for p in prods:
+            item_data = {
+                "barcode": p.barcode or p.sku,
+                "sku": p.sku,
+                "name": p.name,
+                "price": float(p.price),
+                "imageUri": p.image_url or "",
+                "category": p.category or "General",
+                "shelfLocation": p.shelf_location or "Aisle 1",
+                "currentStock": p.current_stock,
+                "createdAt": "2026-09-25",
+            }
+            if p.barcode:
+                results_map[p.barcode] = item_data
+            results_map[p.sku] = item_data
+            prod_list.append(item_data)
+        
+        return JsonResponse({
+            "results": results_map,
+            "products": prod_list,
+            "count": len(prod_list),
+        })
+
+    elif request.method == "POST":
+        data = parse_json_body(request)
+        barcode = data.get("barcode", "").strip()
+        sku = data.get("sku", "").strip() or barcode or f"SKU-{uuid.uuid4().hex[:6].upper()}"
+        name = data.get("name", "").strip() or "New Product"
+        price = Decimal(str(data.get("price", 0.0)))
+        category = data.get("category", "").strip() or "General"
+        shelf_location = data.get("shelfLocation") or data.get("shelf_location") or "Aisle 1"
+        stock = int(data.get("currentStock") or data.get("stock") or 50)
+        image_url = data.get("imageUri") or data.get("imageUrl") or ""
+
+        target_barcode = barcode if barcode else sku
+        product = Product.objects.filter(models_Q(barcode=target_barcode) | models_Q(sku=sku)).first()
+        created = False
+        if not product:
+            product = Product.objects.create(
+                barcode=target_barcode,
+                sku=sku,
+                name=name,
+                price=price,
+                category=category,
+                shelf_location=shelf_location,
+                current_stock=stock,
+                image_url=image_url,
+            )
+            created = True
+        else:
+            product.name = name
+            product.price = price
+            product.category = category
+            product.shelf_location = shelf_location
+            product.current_stock = stock
+            if image_url:
+                product.image_url = image_url
+            product.save()
+
+        return JsonResponse({
+            "barcode": product.barcode,
+            "sku": product.sku,
+            "name": product.name,
+            "price": float(product.price),
+            "imageUri": product.image_url,
+            "category": product.category,
+            "shelfLocation": product.shelf_location,
+            "currentStock": product.current_stock,
+            "createdAt": timezone.now().strftime("%Y-%m-%d"),
+        }, status=201 if created else 200)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "DELETE", "PUT"])
+def product_single_api_view(request: HttpRequest, barcode: str) -> JsonResponse:
+    """
+    Get or delete a single product by barcode or SKU.
+    """
+    clean_code = barcode.strip()
+    p = Product.objects.filter(models_Q(barcode=clean_code) | models_Q(sku=clean_code)).first()
+    if not p:
+        return JsonResponse({"error": f"Product '{barcode}' not found"}, status=404)
+
+    if request.method == "GET":
+        return JsonResponse({
+            "barcode": p.barcode or p.sku,
+            "sku": p.sku,
+            "name": p.name,
+            "price": float(p.price),
+            "imageUri": p.image_url or "",
+            "category": p.category or "General",
+            "shelfLocation": p.shelf_location or "Aisle 1",
+            "currentStock": p.current_stock,
+            "createdAt": "2026-09-25",
+        })
+    elif request.method == "DELETE":
+        p.delete()
+        return JsonResponse({"success": True, "message": f"Product {barcode} deleted"})
 
 
 @require_GET
@@ -675,10 +1063,8 @@ def payment_qr_view(request: HttpRequest) -> JsonResponse:
     final_total = max(Decimal("0.00"), subtotal - discount_amount)
     item_count = sum(item.quantity for item in items)
 
-    # UPI payment URI (Standard for PhonePe, GPay, Paytm)
     upi_uri = f"upi://pay?pa=greenloop@upi&pn=GreenLoopSmartCart&am={final_total:.2f}&cu=INR&tn={cart.cart_id}"
 
-    # Generate QR Code 25x25 matrix
     qr = qrcode.QRCode(
         box_size=1,
         border=0,
@@ -689,7 +1075,6 @@ def payment_qr_view(request: HttpRequest) -> JsonResponse:
     matrix = qr.get_matrix()
     matrix_rows = ["".join("1" if cell else "0" for cell in row) for row in matrix]
 
-    # Generate PNG base64 for frontend
     img_qr = qrcode.make(upi_uri)
     buf = BytesIO()
     img_qr.save(buf, format="PNG")
@@ -721,4 +1106,5 @@ def payment_qr_view(request: HttpRequest) -> JsonResponse:
             }
         }
     })
+
 

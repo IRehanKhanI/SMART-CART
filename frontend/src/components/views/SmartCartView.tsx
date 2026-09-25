@@ -53,8 +53,35 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
   const [isRecordingVoice, setIsRecordingVoice] = useState<boolean>(false);
   const [voiceInputText, setVoiceInputText] = useState<string>("");
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [oledDisplayMode, setOledDisplayMode] = useState<"cart" | "voice" | "price" | "qr">("cart");
+  const [oledDisplayMode, setOledDisplayMode] = useState<"pair_qr" | "cart" | "voice" | "results" | "direction" | "price" | "qr">("cart");
   const [voiceOledLines, setVoiceOledLines] = useState<{ line1: string; line2: string; line3: string; line4: string } | null>(null);
+
+  // Pairing QR Code State for Cart-to-Mobile Connection
+  const [pairingQrData, setPairingQrData] = useState<{
+    cartId: string;
+    qrPayload: string;
+    qrPngBase64: string;
+    instructions: string;
+  } | null>(null);
+
+  // Voice Search & Item Direction State
+  const [searchResults, setSearchResults] = useState<{
+    query: string;
+    items: Array<{ name: string; price: number; shelfLocation: string; direction: string; sku?: string }>;
+    selectedIndex: number;
+  }>({
+    query: "Milk & Biscuits",
+    items: [
+      { name: "Amul Taaza Milk", price: 54, shelfLocation: "Dairy Chiller - Shelf A", direction: ">> Turn Right -> Dairy Chiller Shelf A", sku: "MILK-AMUL-01" },
+      { name: "Parle-G Biscuits", price: 40, shelfLocation: "Aisle 2 - Biscuit Rack 2", direction: ">> Walk Straight 5m -> Aisle 2 Rack 2", sku: "BISC-PARLE-01" },
+      { name: "Coca-Cola 750ml", price: 40, shelfLocation: "Aisle 1 - Cold Beverage Chiller", direction: ">> Turn Left -> Aisle 1 Beverage Chiller", sku: "BEV-COKE-01" },
+      { name: "Maggi Noodles 280g", price: 48, shelfLocation: "Aisle 2 - Instant Foods Shelf B", direction: ">> Walk Straight 6m -> Aisle 2 Instant Foods", sku: "NOOD-MAGGI-01" },
+    ],
+    selectedIndex: 0,
+  });
+
+  // Active highlighted aisle on the visual store map
+  const [highlightedAisle, setHighlightedAisle] = useState<string>("Aisle 3 - Dairy Chiller");
 
   // Payment QR & Final Price State
   const [paymentQrData, setPaymentQrData] = useState<{
@@ -69,6 +96,19 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
   } | null>(null);
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
+
+  // Fetch Pairing QR Code from Backend
+  const fetchPairingQR = async () => {
+    try {
+      const res = await fetch(`${djangoApiBase}/api/cart/pairing-qr/?cart_id=${cart?.cartId || "CART-01"}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPairingQrData(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch pairing QR:", err);
+    }
+  };
 
   const handleFetchPaymentQR = async () => {
     try {
@@ -101,6 +141,40 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
       }
     } catch (err) {
       console.error("Failed to open payment modal:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Perform Voice Search for in-stock items with Direction
+  const handleVoiceSearch = async (queryText: string) => {
+    try {
+      setIsLoading(true);
+      const res = await fetch(`${djangoApiBase}/api/cart/voice-search/?cart_id=${cart?.cartId || "CART-01"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryText }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          setSearchResults({
+            query: data.transcript || queryText,
+            items: data.results,
+            selectedIndex: 0,
+          });
+          setOledDisplayMode("results");
+          const firstItem = data.results[0];
+          if (firstItem.shelfLocation) {
+            setHighlightedAisle(firstItem.shelfLocation);
+          }
+          setSuccessToast(`Found ${data.count} items matching "${queryText}"!`);
+        } else {
+          setSuccessToast(`No in-stock items found matching "${queryText}"`);
+        }
+      }
+    } catch (err) {
+      console.error("Voice search error:", err);
     } finally {
       setIsLoading(false);
     }
@@ -218,6 +292,7 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
   useEffect(() => {
     fetchCart("CART-01");
     fetchMembers();
+    fetchPairingQR();
   }, []);
 
   // Handle Add Item to Cart
@@ -481,85 +556,201 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
         </div>
       )}
 
-      {/* Top Header Card */}
-      <div className="bg-white border border-[#D9DDD8] rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2.5">
-            <div className="w-10 h-10 rounded-lg bg-[#202522] text-white flex items-center justify-center">
-              <span className="material-symbols-outlined text-2xl">shopping_cart</span>
+      {/* SCHOOL SCIENCE & TECH EXHIBITION HERO BANNER */}
+      <div className="bg-gradient-to-r from-[#0d1f14] via-[#122b1c] to-[#0a1a10] border-2 border-emerald-500/40 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+        {/* Glow backdrop */}
+        <div className="absolute -right-20 -top-20 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="bg-emerald-500 text-black text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-sm">
+                <span>🎒</span>
+                <span>School Exhibition Demo</span>
+              </span>
+              <span className="bg-white/10 text-emerald-300 text-xs font-mono font-bold px-2 py-0.5 rounded border border-emerald-500/30">
+                ESP32 + Mobile Camera + I2S Mic + 1.3" OLED
+              </span>
+              <span className="bg-blue-500/20 text-blue-300 text-xs font-mono font-bold px-2 py-0.5 rounded border border-blue-500/30">
+                Django AI Backend :8000
+              </span>
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-xl font-bold tracking-tight text-[#202522]">
-                  Smart Cart Command
-                </h1>
-                <span className="bg-emerald-100 text-emerald-800 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-emerald-300">
-                  ESP32-CAM Live
-                </span>
-              </div>
-              <p className="text-xs text-[#58605b]">
-                Real-time edge vision product scanning & personalized market basket recommendations
-              </p>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+              GreenLoop Smart Retail IoT Cart
+            </h1>
+            <p className="text-xs sm:text-sm text-emerald-200/80 mt-1 max-w-3xl leading-relaxed">
+              Autonomous edge-powered retail shopping: The cart pairs with the shopper's mobile phone camera via a 1.3" OLED QR code, scans products with real-time stock sync, features digital voice search with store aisle directions, and completes instant UPI cashless checkout!
+            </p>
+          </div>
+
+          {/* Active Shopper & Reset Controls */}
+          <div className="flex flex-wrap items-center gap-2 bg-black/40 p-2.5 rounded-xl border border-white/10 shrink-0">
+            <div className="text-xs text-white/70">
+              Shopper:{" "}
+              <strong className="text-emerald-300">
+                {cart?.member ? cart.member.name : "Guest Shopper"}
+              </strong>
             </div>
+            <select
+              aria-label="Select Active Shopper Profile"
+              value={cart?.member ? cart.member.memberId : "guest"}
+              onChange={(e) => handleSwitchMember(e.target.value === "guest" ? null : e.target.value)}
+              className="text-xs bg-[#1a231e] border border-white/20 rounded-lg px-2 py-1 text-white font-medium focus:ring-1 focus:ring-emerald-400 cursor-pointer"
+            >
+              <option value="guest">👤 Guest</option>
+              {membersList.map((m) => (
+                <option key={m.memberId} value={m.memberId}>
+                  ⭐ {m.name} ({m.tier} - {m.discountPercent}% OFF)
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleClearCart}
+              disabled={!cart || cart.items.length === 0}
+              className="text-xs px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-lg cursor-pointer transition-all disabled:opacity-30"
+              title="Clear Cart"
+            >
+              Clear
+            </button>
           </div>
         </div>
 
-        {/* Cart Session & Member Info Selector */}
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Active Shopper Pill */}
-          <div className="flex items-center bg-[#f9faf8] border border-[#D9DDD8] rounded-lg px-3 py-1.5">
-            <div className="text-xs mr-2 text-[#58605b]">Active Shopper:</div>
-            {cart?.member ? (
-              <div className="flex items-center space-x-1.5">
-                <span className="font-bold text-xs text-[#202522]">{cart.member.name}</span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded uppercase ${
-                  cart.member.tier === "Platinum" ? "bg-purple-100 text-purple-800 border border-purple-200" :
-                  cart.member.tier === "Gold" ? "bg-amber-100 text-amber-900 border border-amber-300" :
-                  cart.member.tier === "Silver" ? "bg-slate-100 text-slate-800 border border-slate-300" :
-                  "bg-stone-100 text-stone-700"
-                }`}>
-                  {cart.member.tier} ({cart.member.discountPercent}% OFF)
-                </span>
-                <button
-                  onClick={() => handleSwitchMember(null)}
-                  className="text-[10px] text-red-600 hover:underline ml-1 cursor-pointer"
-                  title="Switch to Guest Shopper"
-                >
-                  (Guest)
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-1.5">
-                <span className="font-bold text-xs text-[#58605b]">Guest Shopper</span>
-                <span className="text-[10px] bg-gray-200 text-gray-700 px-1.5 rounded">No Member</span>
-              </div>
-            )}
+        {/* 5-STEP STUDENT INTERACTIVE FLOW INDICATOR */}
+        <div className="mt-5 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+          <div
+            onClick={() => {
+              fetchPairingQR();
+              setOledDisplayMode("pair_qr");
+            }}
+            className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              oledDisplayMode === "pair_qr"
+                ? "bg-emerald-500/20 border-emerald-400 text-white font-bold"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
+          >
+            <div className="text-base mb-0.5">1️⃣ 📱</div>
+            <div className="font-bold text-[11px]">1. Pair Cart</div>
+            <div className="text-[10px] text-emerald-300/80">OLED QR Scan</div>
           </div>
 
-          {/* Member Quick Switch dropdown */}
-          <select
-            aria-label="Select Active Shopper Profile"
-            value={cart?.member ? cart.member.memberId : "guest"}
-            onChange={(e) => handleSwitchMember(e.target.value === "guest" ? null : e.target.value)}
-            className="text-xs bg-white border border-[#D9DDD8] rounded-lg px-2.5 py-2 font-medium text-[#202522] focus:ring-1 focus:ring-[#202522] cursor-pointer"
+          <div
+            onClick={() => setOledDisplayMode("cart")}
+            className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              oledDisplayMode === "cart"
+                ? "bg-emerald-500/20 border-emerald-400 text-white font-bold"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
           >
-            <option value="guest">👤 Guest (Normal Customer)</option>
-            {membersList.map((m) => (
-              <option key={m.memberId} value={m.memberId}>
-                ⭐ {m.name} ({m.tier} Member)
-              </option>
-            ))}
-          </select>
+            <div className="text-base mb-0.5">2️⃣ 📷</div>
+            <div className="font-bold text-[11px]">2. Mobile Scan</div>
+            <div className="text-[10px] text-emerald-300/80">EAN-13 Barcodes</div>
+          </div>
 
-          {/* Clear Cart Button */}
-          <button
-            onClick={handleClearCart}
-            disabled={!cart || cart.items.length === 0}
-            className="text-xs px-3 py-2 border border-[#D9DDD8] rounded-lg text-[#58605b] hover:bg-gray-50 disabled:opacity-40 cursor-pointer flex items-center space-x-1"
+          <div
+            onClick={() => setOledDisplayMode("voice")}
+            className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              oledDisplayMode === "voice"
+                ? "bg-emerald-500/20 border-emerald-400 text-white font-bold"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
           >
-            <span className="material-symbols-outlined text-sm">restart_alt</span>
-            <span>Clear</span>
-          </button>
+            <div className="text-base mb-0.5">3️⃣ 🎙️</div>
+            <div className="font-bold text-[11px]">3. Voice Search</div>
+            <div className="text-[10px] text-emerald-300/80">INMP441 I2S Mic</div>
+          </div>
+
+          <div
+            onClick={() => setOledDisplayMode("direction")}
+            className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              oledDisplayMode === "direction" || oledDisplayMode === "results"
+                ? "bg-emerald-500/20 border-emerald-400 text-white font-bold"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
+          >
+            <div className="text-base mb-0.5">4️⃣ 🧭</div>
+            <div className="font-bold text-[11px]">4. Aisle Guide</div>
+            <div className="text-[10px] text-emerald-300/80">Shelf Directions</div>
+          </div>
+
+          <div
+            onClick={handleOpenPaymentModal}
+            className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              oledDisplayMode === "price" || oledDisplayMode === "qr"
+                ? "bg-emerald-500/20 border-emerald-400 text-white font-bold"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
+          >
+            <div className="text-base mb-0.5">5️⃣ 💳</div>
+            <div className="font-bold text-[11px]">5. UPI Checkout</div>
+            <div className="text-[10px] text-emerald-300/80">Cashless QR</div>
+          </div>
+        </div>
+
+        {/* 1-CLICK INTERACTIVE PRESENTATION ACTION BAR */}
+        <div className="mt-4 p-3 bg-black/60 border border-emerald-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 text-xs font-bold text-emerald-400">
+            <span className="material-symbols-outlined text-sm">play_circle</span>
+            <span>Presentation Quick Trigger Bar:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => handleAddItem("MILK-AMUL-01")}
+              className="bg-emerald-600 hover:bg-emerald-500 text-black px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Simulates scanning Amul Milk with phone camera"
+            >
+              <span>🥛</span>
+              <span>Scan Milk (₹54)</span>
+            </button>
+
+            <button
+              onClick={() => handleAddItem("BISC-PARLE-01")}
+              className="bg-amber-500 hover:bg-amber-400 text-black px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Simulates scanning Parle-G Biscuits"
+            >
+              <span>🍪</span>
+              <span>Scan Parle-G (₹40)</span>
+            </button>
+
+            <button
+              onClick={() => handleAddItem("BEV-COKE-01")}
+              className="bg-red-500 hover:bg-red-400 text-white px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Simulates scanning Coca-Cola"
+            >
+              <span>🥤</span>
+              <span>Scan Coke (₹40)</span>
+            </button>
+
+            <button
+              onClick={() => handleVoiceSearch("Where is milk?")}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Simulates asking the cart microphone for milk"
+            >
+              <span>🎙️</span>
+              <span>Voice: "Find Milk"</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setHighlightedAisle("Dairy Chiller - Shelf A");
+                setOledDisplayMode("direction");
+              }}
+              className="bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Shows shelf navigation direction on OLED"
+            >
+              <span>🧭</span>
+              <span>Show Direction</span>
+            </button>
+
+            <button
+              onClick={handleOpenPaymentModal}
+              className="bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-black px-2.5 py-1 rounded text-xs font-black transition-all cursor-pointer shadow-sm flex items-center space-x-1"
+              title="Opens UPI QR payment modal"
+            >
+              <span>💳</span>
+              <span>UPI Checkout</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -577,22 +768,43 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
                   1.3" OLED Screen (128×64)
                 </span>
               </div>
-              <div className="flex items-center bg-white/10 p-0.5 rounded text-[10px] font-mono">
+              <div className="flex flex-wrap items-center bg-white/10 p-0.5 rounded text-[10px] font-mono gap-0.5">
+                <button
+                  onClick={() => {
+                    fetchPairingQR();
+                    setOledDisplayMode("pair_qr");
+                  }}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "pair_qr" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                >
+                  Pair QR
+                </button>
                 <button
                   onClick={() => setOledDisplayMode("cart")}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "cart" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "cart" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
                 >
                   Cart
                 </button>
                 <button
                   onClick={() => setOledDisplayMode("voice")}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "voice" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "voice" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
                 >
                   Voice
                 </button>
                 <button
+                  onClick={() => setOledDisplayMode("results")}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "results" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                >
+                  Results
+                </button>
+                <button
+                  onClick={() => setOledDisplayMode("direction")}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "direction" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                >
+                  Direction
+                </button>
+                <button
                   onClick={handleFetchPaymentQR}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "price" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "price" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
                 >
                   Price
                 </button>
@@ -601,9 +813,9 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
                     if (!paymentQrData) handleFetchPaymentQR();
                     setOledDisplayMode("qr");
                   }}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "qr" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
+                  className={`px-1.5 py-0.5 rounded cursor-pointer transition-colors ${oledDisplayMode === "qr" ? "bg-emerald-500 text-black font-bold" : "text-white/60 hover:text-white"}`}
                 >
-                  QR Code
+                  Pay QR
                 </button>
               </div>
             </div>
@@ -613,7 +825,125 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
               {/* Scanline / Pixel Grid Effect */}
               <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.35)_50%)] bg-[length:100%_4px] pointer-events-none rounded"></div>
 
-              {oledDisplayMode === "price" ? (
+              {oledDisplayMode === "pair_qr" ? (
+                <>
+                  {/* PAIRING QR CODE SCREEN */}
+                  <div className="flex items-center justify-between h-full py-1">
+                    <div className="space-y-1 text-left flex-1">
+                      <div className="bg-[#34d399] text-black px-1.5 py-0.5 text-xs font-black tracking-wide rounded-xs uppercase flex justify-between">
+                        <span>CART #01</span>
+                        <span className="text-[9px] font-semibold opacity-80">PAIR</span>
+                      </div>
+                      <div className="text-emerald-300 font-bold text-xs leading-tight mt-1">
+                        SCAN TO CONNECT
+                      </div>
+                      <div className="text-[9px] text-emerald-400/90 leading-tight">
+                        1. Open Mobile App
+                      </div>
+                      <div className="text-[9px] text-emerald-400/90 leading-tight">
+                        2. Scan this QR Code
+                      </div>
+                      <div className="text-[9px] text-emerald-500 font-mono font-bold pt-0.5">
+                        CART:CART-01
+                      </div>
+                    </div>
+                    <div className="bg-white p-1 rounded shadow-xs ml-2 shrink-0">
+                      {pairingQrData?.qrPngBase64 ? (
+                        <img src={pairingQrData.qrPngBase64} alt="Pairing QR" className="w-20 h-20" />
+                      ) : (
+                        <div className="w-20 h-20 bg-black flex items-center justify-center text-[9px] text-white text-center">
+                          Loading QR...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : oledDisplayMode === "results" ? (
+                <>
+                  {/* SEARCH RESULTS ROWS SCREEN */}
+                  <div className="flex flex-col justify-between h-full py-0.5">
+                    <div className="bg-[#34d399] text-black px-1.5 py-0.5 text-xs font-black tracking-wide rounded-xs uppercase flex justify-between">
+                      <span>IN-STOCK ITEMS ({searchResults.items.length})</span>
+                      <span className="text-[9px] font-semibold opacity-80">ROWS</span>
+                    </div>
+                    <div className="space-y-1 my-1">
+                      {searchResults.items.slice(0, 3).map((item, idx) => {
+                        const isSelected = searchResults.selectedIndex === idx;
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              setSearchResults(prev => ({ ...prev, selectedIndex: idx }));
+                              setHighlightedAisle(item.shelfLocation);
+                              setOledDisplayMode("direction");
+                            }}
+                            className={`px-1.5 py-0.5 text-[10px] truncate cursor-pointer rounded flex items-center justify-between transition-colors ${
+                              isSelected
+                                ? "bg-emerald-500/20 text-emerald-300 font-black border border-emerald-500/50"
+                                : "text-emerald-400/80 hover:text-white"
+                            }`}
+                          >
+                            <span>{isSelected ? "▶ " : "  "}{idx + 1}. {item.name}</span>
+                            <span className="font-mono text-emerald-300 font-bold">₹{item.price}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="bg-emerald-950/60 border border-emerald-800/40 rounded px-1.5 py-0.5 text-[9px] text-emerald-200 flex justify-between items-center">
+                      <span>[FWD/BACK: Nav]</span>
+                      <button
+                        onClick={() => {
+                          const item = searchResults.items[searchResults.selectedIndex];
+                          if (item) setHighlightedAisle(item.shelfLocation);
+                          setOledDisplayMode("direction");
+                        }}
+                        className="bg-emerald-500 hover:bg-emerald-400 text-black px-2 py-0.5 rounded text-[8px] font-bold cursor-pointer"
+                      >
+                        [OK: Direction]
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : oledDisplayMode === "direction" ? (
+                <>
+                  {/* ITEM DIRECTION NAVIGATION SCREEN */}
+                  <div className="flex flex-col justify-between h-full py-0.5">
+                    <div className="bg-[#34d399] text-black px-1.5 py-0.5 text-xs font-black tracking-wide rounded-xs uppercase flex justify-between">
+                      <span>ITEM NAVIGATION</span>
+                      <span className="text-[9px] font-semibold opacity-80">AISLE</span>
+                    </div>
+                    <div className="my-1 space-y-0.5">
+                      <div className="text-emerald-300 font-bold text-xs truncate">
+                        {searchResults.items[searchResults.selectedIndex]?.name || "Amul Taaza Milk"}
+                      </div>
+                      <div className="text-emerald-400/90 text-[10px] truncate">
+                        📍 {searchResults.items[searchResults.selectedIndex]?.shelfLocation || "Dairy Chiller - Shelf A"}
+                      </div>
+                      <div className="bg-emerald-900/40 border border-emerald-500/40 rounded p-1 text-[10px] font-bold text-emerald-200 animate-pulse truncate">
+                        {searchResults.items[searchResults.selectedIndex]?.direction || ">> Turn Right -> Dairy Chiller"}
+                      </div>
+                    </div>
+                    <div className="bg-emerald-950/60 border border-emerald-800/40 rounded px-1.5 py-0.5 text-[9px] text-emerald-200 flex justify-between items-center">
+                      <button
+                        onClick={() => setOledDisplayMode("results")}
+                        className="text-emerald-400 hover:underline cursor-pointer text-[9px]"
+                      >
+                        « Back
+                      </button>
+                      <button
+                        onClick={() => {
+                          const item = searchResults.items[searchResults.selectedIndex];
+                          if (item?.sku) handleAddItem(item.sku);
+                          setOledDisplayMode("cart");
+                        }}
+                        className="bg-emerald-500 hover:bg-emerald-400 text-black px-2 py-0.5 rounded text-[8px] font-bold cursor-pointer"
+                      >
+                        + Put in Cart
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : oledDisplayMode === "price" ? (
                 <>
                   {/* STEP 1: FINAL PRICE SCREEN */}
                   <div className="bg-[#34d399] text-black px-1.5 py-0.5 text-xs font-black tracking-wide rounded-xs uppercase flex justify-between">
@@ -719,6 +1049,27 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
                   </div>
                 </>
               )}
+            </div>
+
+            {/* HARDWARE ARCHITECTURE & PINOUT SPECIFICATION CARD */}
+            <div className="mt-3 p-3 bg-black/60 border border-emerald-500/20 rounded-lg font-mono text-[11px] space-y-1.5">
+              <div className="flex items-center justify-between text-emerald-400 font-bold pb-1 border-b border-white/10">
+                <span className="flex items-center space-x-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>ESP32 HARDWARE PINOUT</span>
+                </span>
+                <span className="text-[9px] bg-emerald-900/50 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                  DevKit V1
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-white/70 text-[10px]">
+                <div>• <strong>Scanner:</strong> Mobile Phone Camera</div>
+                <div>• <strong>1.3" OLED:</strong> SDA=21, SCL=22</div>
+                <div>• <strong>INMP441 Mic:</strong> SCK=14, WS=15, SD=32</div>
+                <div>• <strong>Buttons:</strong> FWD=18, BACK=19, OK=4</div>
+                <div>• <strong>Bought LED:</strong> GPIO 16 (Green)</div>
+                <div>• <strong>Pairing:</strong> OLED QR (CART:CART-01)</div>
+              </div>
             </div>
 
             {/* Hardware Status Indicators & Live Stream Controls */}
@@ -1038,6 +1389,120 @@ export const SmartCartView: React.FC<SmartCartViewProps> = ({
 
         {/* RIGHT COLUMN: Active Cart Basket & AI Recommendations (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
+
+          {/* INTERACTIVE STORE FLOORPLAN & AISLE NAVIGATOR (FOR SCHOOL DEMO) */}
+          <div className="bg-white border border-[#D9DDD8] rounded-xl p-5 shadow-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-[#D9DDD8] mb-3">
+              <div className="flex items-center space-x-2">
+                <span className="material-symbols-outlined text-xl text-purple-700">map</span>
+                <div>
+                  <h2 className="text-sm font-bold text-[#202522] tracking-tight uppercase">
+                    Interactive Store Floorplan & Aisle Radar
+                  </h2>
+                  <p className="text-[11px] text-[#58605b]">
+                    Shows exact shelf directions computed by the AI backend when items are selected or voice-searched
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200">
+                Live Aisle Locator
+              </span>
+            </div>
+
+            {/* Store Grid Map */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-3">
+              {/* Aisle 1 */}
+              <div
+                onClick={() => {
+                  setHighlightedAisle("Aisle 1 - Cold Beverage Chiller");
+                  setOledDisplayMode("direction");
+                }}
+                className={`p-3 rounded-xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+                  highlightedAisle.toLowerCase().includes("aisle 1") || highlightedAisle.toLowerCase().includes("beverage")
+                    ? "bg-blue-50/80 border-blue-500 shadow-sm"
+                    : "bg-[#fbfcfb] border-dashed border-[#D9DDD8] hover:border-gray-400"
+                }`}
+              >
+                {highlightedAisle.toLowerCase().includes("aisle 1") && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-blue-600 animate-ping"></span>
+                )}
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-[#202522]">AISLE 1</span>
+                  <span className="text-base">🥤</span>
+                </div>
+                <div className="text-[11px] font-bold text-blue-900">Cold Beverages & Juices</div>
+                <div className="text-[10px] text-[#58605b] mt-1">Coca-Cola, Pepsi, Real Juice</div>
+                <div className="text-[9px] font-mono text-blue-700 mt-2 font-semibold">
+                  🧭 Turn Left from Entrance
+                </div>
+              </div>
+
+              {/* Aisle 2 */}
+              <div
+                onClick={() => {
+                  setHighlightedAisle("Aisle 2 - Biscuit Rack 2");
+                  setOledDisplayMode("direction");
+                }}
+                className={`p-3 rounded-xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+                  highlightedAisle.toLowerCase().includes("aisle 2") || highlightedAisle.toLowerCase().includes("biscuit") || highlightedAisle.toLowerCase().includes("food")
+                    ? "bg-amber-50/80 border-amber-500 shadow-sm"
+                    : "bg-[#fbfcfb] border-dashed border-[#D9DDD8] hover:border-gray-400"
+                }`}
+              >
+                {highlightedAisle.toLowerCase().includes("aisle 2") && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-amber-600 animate-ping"></span>
+                )}
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-[#202522]">AISLE 2</span>
+                  <span className="text-base">🍪</span>
+                </div>
+                <div className="text-[11px] font-bold text-amber-900">Biscuits, Tea & Noodles</div>
+                <div className="text-[10px] text-[#58605b] mt-1">Parle-G, Maggi, Tata Tea</div>
+                <div className="text-[9px] font-mono text-amber-800 mt-2 font-semibold">
+                  🧭 Walk Straight 5-6m
+                </div>
+              </div>
+
+              {/* Aisle 3 */}
+              <div
+                onClick={() => {
+                  setHighlightedAisle("Dairy Chiller - Shelf A");
+                  setOledDisplayMode("direction");
+                }}
+                className={`p-3 rounded-xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+                  highlightedAisle.toLowerCase().includes("dairy") || highlightedAisle.toLowerCase().includes("chiller")
+                    ? "bg-emerald-50/80 border-emerald-500 shadow-sm"
+                    : "bg-[#fbfcfb] border-dashed border-[#D9DDD8] hover:border-gray-400"
+                }`}
+              >
+                {highlightedAisle.toLowerCase().includes("dairy") && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-emerald-600 animate-ping"></span>
+                )}
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-[#202522]">AISLE 3</span>
+                  <span className="text-base">🥛</span>
+                </div>
+                <div className="text-[11px] font-bold text-emerald-900">Dairy & Milk Chiller</div>
+                <div className="text-[10px] text-[#58605b] mt-1">Amul Taaza, Butter, Paneer</div>
+                <div className="text-[9px] font-mono text-emerald-800 mt-2 font-semibold">
+                  🧭 Turn Right → Wall Chiller
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Navigator Status Strip */}
+            <div className="p-2.5 bg-gray-50 border border-[#D9DDD8] rounded-lg flex flex-col sm:flex-row items-center justify-between text-xs gap-2">
+              <div className="flex items-center space-x-2">
+                <span className="material-symbols-outlined text-base text-purple-600">navigation</span>
+                <span className="text-[#58605b]">
+                  Selected Location: <strong className="text-[#202522]">{highlightedAisle}</strong>
+                </span>
+              </div>
+              <div className="flex items-center space-x-2 font-mono text-[11px] text-purple-700 font-bold">
+                <span>Displaying live on Cart 1.3" OLED [Direction Mode]</span>
+              </div>
+            </div>
+          </div>
 
           {/* Active Cart Basket */}
           <div className="bg-white border border-[#D9DDD8] rounded-xl p-5 shadow-xs">
