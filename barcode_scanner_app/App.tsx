@@ -53,6 +53,8 @@ export default function App() {
   const [cartSummary, setCartSummary] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   const [cartToast, setCartToast] = useState<{ message: string; submessage?: string } | null>(null);
   const lastScannedRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
+  const codeCooldownMapRef = useRef<Record<string, number>>({});
+  const lastToastTimeRef = useRef<number>(0);
 
   // Product Database state
   const [productMap, setProductMap] = useState<Record<string, ProductItem>>({});
@@ -71,24 +73,41 @@ export default function App() {
   const [currentResult, setCurrentResult] = useState<ScanHistoryItem | null>(null);
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
 
+  // Synchronize cartSummary with ground-truth cart session
+  const syncCartSummary = async (cartId?: string) => {
+    const targetCart = cartId || pairedCartId || 'CART-01';
+    try {
+      const details = await productDb.getCartDetails(targetCart);
+      if (details) {
+        setCartSummary({ count: details.itemCount, total: details.total });
+      } else {
+        setCartSummary({ count: 0, total: 0 });
+      }
+    } catch (e) {
+      console.warn('Could not sync cart summary:', e);
+    }
+  };
+
   // Load product database and paired cart on startup
   const refreshProducts = async () => {
     const data = await productDb.getAllProducts();
     setProductMap(data);
     const storedCart = await productDb.getPairedCartId();
+    const activeCart = storedCart || 'CART-01';
     if (storedCart) {
       setPairedCartId(storedCart);
-      productDb.getCartDetails(storedCart).then((details) => {
-        if (details) {
-          setCartSummary({ count: details.itemCount, total: details.total });
-        }
-      });
     }
+    syncCartSummary(activeCart);
   };
 
   useEffect(() => {
     refreshProducts();
   }, []);
+
+  // Sync cart item count whenever user switches tabs (e.g. from Cart back to Scanner)
+  useEffect(() => {
+    syncCartSummary(pairedCartId);
+  }, [activeTab, pairedCartId]);
 
   if (!permission) {
     return (
@@ -123,15 +142,34 @@ export default function App() {
     const rawBarcode = (result.data || '').trim();
     if (!rawBarcode) return;
 
-    // Check continuous debounce in batch mode: ignore duplicate scans within 1.5 seconds
     const now = Date.now();
-    if (
-      scanMode === 'batch' &&
-      lastScannedRef.current.code === rawBarcode &&
-      now - lastScannedRef.current.time < 1500
-    ) {
+    const lastCode = lastScannedRef.current.code;
+    const lastTime = lastScannedRef.current.time;
+
+    // 1. Frame jitter guard: minimum 600ms between any scanner trigger
+    if (now - lastTime < 600) {
       return;
     }
+
+    // 2. Continuous Multi-Scan debounce:
+    // If scanning the EXACT SAME item in batch mode, enforce a 5.0-second cooldown!
+    // This completely prevents the camera from repeatedly scanning and adding the same product
+    // while the user is simply holding it in the viewfinder.
+    const cooldownUntil = codeCooldownMapRef.current[rawBarcode] || 0;
+    if (scanMode === 'batch' && rawBarcode === lastCode && now < cooldownUntil) {
+      if (now - lastToastTimeRef.current > 3000) {
+        lastToastTimeRef.current = now;
+        setCartToast({
+          message: 'Item already in cart',
+          submessage: 'Aim camera at next item to continue multi-scan',
+        });
+        setTimeout(() => setCartToast(null), 2500);
+      }
+      return;
+    }
+
+    // Mark 5s cooldown for this barcode
+    codeCooldownMapRef.current[rawBarcode] = now + 5000;
     lastScannedRef.current = { code: rawBarcode, time: now };
 
     if (scanned && scanMode === 'single') return;
@@ -720,6 +758,7 @@ export default function App() {
                 setActiveTab('scanner');
                 handleNewScanTrigger();
               }}
+              onCartUpdated={(summary) => setCartSummary(summary)}
             />
           )}
 
@@ -728,6 +767,7 @@ export default function App() {
             <VoiceSearchView
               pairedCartId={pairedCartId}
               onItemAddedToCart={(name) => {
+                syncCartSummary(pairedCartId);
                 if (hapticEnabled && Platform.OS !== 'web') {
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
                 }

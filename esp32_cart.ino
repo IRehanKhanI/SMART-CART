@@ -482,7 +482,7 @@ void fetchCartOledStatus() {
 
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
-    StaticJsonDocument<1024> doc;
+    StaticJsonDocument<4096> doc;
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
@@ -493,6 +493,36 @@ void fetchCartOledStatus() {
       displayState.total = doc["total"] | displayState.total;
       displayState.itemCount = doc["count"] | displayState.itemCount;
       displayState.isPaired = doc["is_paired"] | false;
+
+      // Check if mobile app triggered checkout payment QR
+      bool hasPayQr = doc["has_pay_qr"] | false;
+      if (hasPayQr) {
+        displayState.finalPayAmount  = doc["pay_amount"] | displayState.total;
+        displayState.discountPercent = doc["discount_percent"] | 0.0;
+        displayState.qrSize          = doc["qrSize"] | 25;
+        JsonArray rows = doc["qrMatrix"].as<JsonArray>();
+        int rIdx = 0;
+        for (const char* rowStr : rows) {
+          if (rIdx < 35 && rowStr) {
+            strncpy(displayState.qrMatrix[rIdx], rowStr, 34);
+            displayState.qrMatrix[rIdx][34] = '\0';
+            rIdx++;
+          }
+        }
+        displayState.hasQrCode = (rIdx > 0);
+        if (currentMode != MODE_PAY_QR) {
+          currentMode = MODE_PAY_QR;
+          Serial.println("[Smart Cart]: Mobile Checkout triggered! Showing Payment QR on 1.3\" OLED.");
+        }
+        renderOLED();
+        http.end();
+        return;
+      } else if (currentMode == MODE_PAY_QR && !hasPayQr) {
+        // Payment was completed on mobile app or cancelled
+        currentMode = MODE_CART;
+        Serial.println("[Smart Cart]: Payment completed / cancelled. Reverting to Cart mode.");
+        renderOLED();
+      }
 
       // If user was on pairing screen and app paired, auto-switch to cart mode!
       if (currentMode == MODE_PAIRING_QR && displayState.isPaired) {
@@ -1010,7 +1040,7 @@ void loop() {
   // -------------------------------------------------------------
   // 4. Periodic Status Poll (every 3s when in Cart or Pairing mode)
   // -------------------------------------------------------------
-  if ((currentMode == MODE_CART || currentMode == MODE_PAIRING_QR) && (millis() - lastStatusPoll > POLL_INTERVAL_MS)) {
+  if ((currentMode == MODE_CART || currentMode == MODE_PAIRING_QR || currentMode == MODE_PAY_QR) && (millis() - lastStatusPoll > POLL_INTERVAL_MS)) {
     lastStatusPoll = millis();
     fetchCartOledStatus();
   }

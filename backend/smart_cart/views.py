@@ -28,6 +28,8 @@ latest_scan_debug: Dict[str, Any] = {
 cart_active_searches: Dict[str, Any] = {}
 # In-memory pairing flag per cart
 cart_paired_status: Dict[str, Any] = {}
+# In-memory store for active checkout payment QR sessions (mirrored on ESP32 1.3" OLED)
+cart_active_checkouts: Dict[str, Any] = {}
 
 
 
@@ -403,24 +405,38 @@ def cart_items_view(request: HttpRequest) -> JsonResponse:
     elif request.method == "POST":
         data = parse_json_body(request)
         product_id = data.get("product_id")
+        item_id = data.get("item_id")
         sku = data.get("sku")
         quantity = int(data.get("quantity", 1))
+        action = data.get("action", "set")
 
         product = None
-        if product_id:
-            product = Product.objects.filter(id=product_id).first()
-        elif sku:
-            product = Product.objects.filter(sku=sku).first()
+        if item_id:
+            cart_item = CartItem.objects.filter(cart=cart, id=item_id).first()
+            if cart_item:
+                product = cart_item.product
+        if not product:
+            if product_id:
+                product = Product.objects.filter(id=product_id).first()
+            elif sku:
+                product = Product.objects.filter(sku=sku).first()
 
         if not product:
             return JsonResponse({"error": "Product not found"}, status=404)
 
         cart_item, created = CartItem.objects.get_or_create(cart=cart, product=product)
-        if not created:
-            cart_item.quantity += quantity
+        if action == "add" or "delta" in data:
+            delta = int(data.get("delta") or quantity)
+            cart_item.quantity += delta
         else:
+            # Set to the exact target quantity
             cart_item.quantity = quantity
-        cart_item.save(update_fields=["quantity"])
+
+        if cart_item.quantity <= 0:
+            cart_item.delete()
+        else:
+            cart_item.save(update_fields=["quantity"])
+
         cart.save(update_fields=["updated_at"])
         return JsonResponse(serialize_cart(cart))
 
@@ -428,9 +444,12 @@ def cart_items_view(request: HttpRequest) -> JsonResponse:
         data = parse_json_body(request)
         item_id = data.get("item_id")
         sku = data.get("sku")
+        product_id = data.get("product_id")
 
         if item_id:
             CartItem.objects.filter(cart=cart, id=item_id).delete()
+        elif product_id:
+            CartItem.objects.filter(cart=cart, product_id=product_id).delete()
         elif sku:
             CartItem.objects.filter(cart=cart, product__sku=sku).delete()
         else:
@@ -498,6 +517,7 @@ def checkout_cart_view(request: HttpRequest) -> JsonResponse:
     # Reset active cart items
     cart.items.all().delete()
     cart.save(update_fields=["updated_at"])
+    cart_active_checkouts.pop(cart_id, None)
 
     return JsonResponse({
         "success": True,
@@ -549,6 +569,38 @@ def oled_status_view(request: HttpRequest) -> JsonResponse:
     # Check if there is an active search result for this cart
     search_data = cart_active_searches.get(cart_id)
 
+    # Check if there is an active checkout payment session for this cart (mirrored to 1.3" OLED)
+    checkout_session = cart_active_checkouts.get(cart_id)
+    is_checkout_pending = False
+    if checkout_session and checkout_session.get("active"):
+        # Auto-expire after 180 seconds if user abandons
+        if timezone.now().timestamp() - checkout_session.get("timestamp", 0) < 180:
+            is_checkout_pending = True
+        else:
+            cart_active_checkouts.pop(cart_id, None)
+
+    if is_checkout_pending:
+        return JsonResponse({
+            "cart_id": cart.cart_id,
+            "is_paired": is_paired,
+            "member": shopper_tag,
+            "count": sum(i.quantity for i in items),
+            "total": float(total),
+            "recs": rec_names,
+            "mode": "PAY_QR",
+            "has_pay_qr": True,
+            "pay_amount": checkout_session["finalTotal"],
+            "discount_percent": checkout_session["discountPercent"],
+            "qrSize": checkout_session["qrSize"],
+            "qrMatrix": checkout_session["qrMatrix"],
+            "line1": f"{cart.cart_id} [PAY NOW]"[:21],
+            "line2": f"Rs.{checkout_session['finalTotal']:.2f} SCAN QR"[:21],
+            "line3": "GPAY/PHONEPE/PAYTM"[:21],
+            "line4": "OK: CONFIRM PAID"[:21],
+            "has_search": False,
+            "search": None,
+        })
+
     return JsonResponse({
         "cart_id": cart.cart_id,
         "is_paired": is_paired,
@@ -556,6 +608,8 @@ def oled_status_view(request: HttpRequest) -> JsonResponse:
         "count": sum(i.quantity for i in items),
         "total": float(total),
         "recs": rec_names,
+        "mode": "CART",
+        "has_pay_qr": False,
         "line1": f"{cart.cart_id} [{shopper_tag}]"[:21],
         "line2": line2[:21],
         "line3": f"TOT: Rs.{total:.2f} ({len(items)} items)"[:21],
@@ -1041,17 +1095,24 @@ def product_single_api_view(request: HttpRequest, barcode: str) -> JsonResponse:
         return JsonResponse({"success": True, "message": f"Product {barcode} deleted"})
 
 
-@require_GET
+@csrf_exempt
+@require_http_methods(["GET", "DELETE"])
 def payment_qr_view(request: HttpRequest) -> JsonResponse:
     """
     Generates a UPI Payment QR Code with exact final price and 2D matrix
-    for both 1.3" OLED rendering on ESP32 and web frontend display.
+    for both 1.3" OLED rendering on ESP32 and mobile/web frontend display.
+    Supports DELETE method to cancel active checkout session.
     """
     import base64
     from io import BytesIO
     import qrcode
 
     cart_id = request.GET.get("cart_id") or "CART-01"
+
+    if request.method == "DELETE":
+        cart_active_checkouts.pop(cart_id, None)
+        return JsonResponse({"status": "cancelled", "cartId": cart_id})
+
     cart = get_or_create_cart(cart_id)
     items = list(cart.items.select_related("product").all())
 
@@ -1079,6 +1140,17 @@ def payment_qr_view(request: HttpRequest) -> JsonResponse:
     buf = BytesIO()
     img_qr.save(buf, format="PNG")
     b64_png = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    # Record active checkout session for ESP32 1.3" OLED mirror
+    cart_active_checkouts[cart_id] = {
+        "active": True,
+        "finalTotal": float(final_total),
+        "discountPercent": float(discount_pct),
+        "itemCount": item_count,
+        "qrSize": len(matrix),
+        "qrMatrix": matrix_rows,
+        "timestamp": timezone.now().timestamp(),
+    }
 
     return JsonResponse({
         "cartId": cart.cart_id,

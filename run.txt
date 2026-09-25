@@ -1,0 +1,242 @@
+================================================================================
+          GREENLOOP AI-POWERED SMART CART & RETAIL PLATFORM
+                     STEP-BY-STEP QUICKSTART GUIDE
+================================================================================
+
+Welcome! This document explains how to set up, configure, and run all components
+of the GreenLoop Smart Retail system from scratch.
+
+--------------------------------------------------------------------------------
+1. SYSTEM ARCHITECTURE AT A GLANCE
+--------------------------------------------------------------------------------
+- BACKEND: Django REST API (Port 8000)
+  Folder: /backend
+  Handles product catalog, cart sessions, recommendations, AI voice search,
+  and dynamic UPI QR code generation.
+
+- MOBILE APP: React Native + Expo
+  Folder: /barcode_scanner_app
+  Used on your smartphone to scan product barcodes, view cart, search items with
+  shelf direction guidance (Left/Right/Straight), and display UPI payment QR.
+
+- HARDWARE FIRMWARE: Standard ESP32
+  File: /esp32_cart.ino (in root folder)
+  Runs on ESP32 DevKit V1 with 1.3" I2C OLED display (SH1106) and INMP441 I2S
+  digital microphone for physical cart HUD, live sync, and voice search.
+
+- WEB DASHBOARD: React + Vite (Store Management)
+  Folder: /frontend
+  Command dashboard for inventory tracking and retail floor plan analytics.
+
+================================================================================
+2. CRITICAL FIRST STEP: FIND & CONFIGURE YOUR COMPUTER'S IP ADDRESS
+================================================================================
+Your PC, your Mobile Phone, and your ESP32 MUST be connected to the SAME Wi-Fi network!
+(Tip: Turning on your laptop's Mobile Hotspot and connecting both Phone and ESP32 to it
+is the easiest and most reliable method!)
+
+HOW TO FIND YOUR COMPUTER'S IP ADDRESS:
+1. Open PowerShell or Command Prompt on your computer.
+2. Run:
+     ipconfig
+3. Look for "IPv4 Address" under your active Wi-Fi or Hotspot adapter.
+   Example: 192.168.1.15  or  192.168.137.1
+
+WHERE TO UPDATE THIS IP ADDRESS:
+--------------------------------
+A) In ESP32 Firmware:
+   Open "esp32_cart.ino" in Arduino IDE.
+   Around line 43-48, update:
+     const char* WIFI_SSID     = "Your_WiFi_Name";
+     const char* WIFI_PASSWORD = "Your_WiFi_Password";
+     String serverBaseUrl      = "http://YOUR_PC_IP:8000";
+
+B) In Mobile App (productDb.ts):
+   Open "barcode_scanner_app/src/services/productDb.ts".
+   At line 10, put your IP as the first candidate in the list:
+     const CANDIDATE_IPS = ['YOUR_PC_IP', '192.168.137.1', ...];
+   
+   OR inside the Mobile App UI:
+   Open the app -> Go to "Settings" tab -> Under "Backend Server Endpoint",
+   type: http://YOUR_PC_IP:8000 and click "Save & Test Connection".
+
+================================================================================
+3. RUNNING THE BACKEND (DJANGO API)
+================================================================================
+Prerequisites: Python 3.10, 3.11, 3.12, or 3.13 installed.
+
+Step 1: Open a terminal in the root folder:
+     cd backend
+
+Step 2: Create and activate a Python virtual environment:
+   Windows:
+     python -m venv venv
+     .\venv\Scripts\activate
+   
+
+Step 3: Install required libraries:
+     pip install -r requirements.txt
+     pip install qrcode pillow
+
+Step 4: Run database migrations and seed sample retail data:
+     python manage.py migrate
+     python manage.py seed_cart_data
+     python manage.py seed_demo
+
+Step 5: Start the Django development server on all network interfaces:
+     python manage.py runserver 0.0.0.0:8000
+
+Step 6: Verify in your web browser:
+   Open: http://localhost:8000/api/cart/session/?cart_id=CART-01
+   You should see a JSON response with status and cart metrics.
+
+================================================================================
+4. RUNNING THE MOBILE APP (EXPO / REACT NATIVE)
+================================================================================
+Prerequisites:
+- Node.js (version 18 or 20+) installed on your PC. Download from: https://nodejs.org
+- Install "Expo Go" on your smartphone from Google Play Store (Android) or App Store (iOS).
+
+Step 1: Open a NEW terminal window:
+     cd barcode_scanner_app
+
+Step 2: Install node packages:
+     npm install
+
+Step 3: Start Expo:
+     npx expo start
+
+Step 4: Launch on your phone:
+   - A large QR code will appear in your terminal.
+   - On Android: Open the "Expo Go" app -> Tap "Scan QR code" -> Scan the terminal QR.
+   - On iPhone: Open the default Camera app -> Tap the Expo prompt.
+   - The app will bundle and load Station 01 onto your phone!
+
+Step 5: If you need to run on Android Emulator or Web:
+   - Press 'a' in terminal for Android Emulator.
+   - Press 'w' in terminal for Web browser.
+
+================================================================================
+5. FLASHING THE ESP32 MICROCONTROLLER FIRMWARE
+================================================================================
+Which file to open:
+   Open "esp32_cart.ino" in Arduino IDE. (Do NOT use esp32_cam_cart.ino)
+
+Required Arduino IDE Libraries:
+   In Arduino IDE, go to Sketch -> Include Library -> Manage Libraries (Ctrl+Shift+I):
+   Search for and install:
+   1. "U8g2" by oliver (for the 1.3" OLED display)
+   2. "ArduinoJson" by Benoit Blanchon (version 6.x or 7.x)
+
+Hardware Wiring Diagram (Standard ESP32 DevKit V1):
+--------------------------------------------------
+A) 1.3" I2C OLED Display (SH1106 / SSD1306):
+   - VCC -> 3.3V
+   - GND -> GND
+   - SDA -> GPIO 21
+   - SCL -> GPIO 22
+
+B) INMP441 I2S Digital Microphone Module:
+   - VDD -> 3.3V
+   - GND -> GND
+   - L/R -> GND (Selects Left channel)
+   - SCK -> GPIO 14 (BCLK)
+   - WS  -> GPIO 15 (LRCLK)
+   - SD  -> GPIO 32 (DOUT)
+
+C) Physical Push Buttons (Active LOW):
+   - Button 1 (Forward / Next Row): GPIO 18 to GND
+   - Button 2 (Backward / Prev Row / Long-press: Voice Mic): GPIO 19 to GND
+   - Button 3 (OK / Select / Long-press: Checkout): GPIO 4 to GND
+
+D) Bought Indicator LED:
+   - Anode (Long leg) -> GPIO 16 (via a 220-330 ohm resistor)
+   - Cathode (Short leg) -> GND
+
+Arduino IDE Upload Settings:
+   - Tools -> Board -> "ESP32 Dev Module" (or "DOIT ESP32 DEVKIT V1")
+   - Tools -> Upload Speed -> 115200 or 921600
+   - Tools -> Port -> Select the COM port of your plugged ESP32.
+   - Click the "Upload" arrow!
+
+================================================================================
+6. RUNNING THE WEB DASHBOARD (OPTIONAL STORE ANALYTICS)
+================================================================================
+Prerequisites: Node.js installed.
+
+Step 1: Open a terminal:
+     cd frontend
+
+Step 2: Install dependencies:
+     npm install
+
+Step 3: Run the web server:
+     npm run dev
+
+Step 4: Open in browser:
+     http://localhost:3000  (or the URL shown in terminal)
+
+================================================================================
+7. END-TO-END DEMO WORKFLOW (HOW TO TEST EVERYTHING)
+================================================================================
+1. PAIRING:
+   - Power up the ESP32. The 1.3" OLED displays the Cart Pairing QR ("CART-01").
+   - Open Mobile App on your phone.
+   - Aim camera at the OLED QR code.
+   - Phone vibrates and displays: "🛒 Paired with CART-01!".
+   - ESP32 OLED automatically switches to "CART-01 [PAIRED]".
+
+2. SCANNING PRODUCTS TO CART:
+   - On Phone: Select "[🛒 Scan to Cart]" and "[🔄 Multi-Scan]".
+   - Point camera at product barcodes (e.g., Amul Milk, Parle-G, Colgate, Coke).
+   - Phone immediately adds the item, calculates totals, and shows recommendations!
+   - Built-in 5-second cooldown prevents duplicate scans if you keep holding the item.
+   - The ESP32 OLED display updates synchronously with item name, price, and total!
+   - The Bought LED flashes to confirm each item!
+
+3. VOICE SEARCH & STORE NAVIGATION:
+   - On Phone: Tap the "Voice & Search" tab.
+     Type or speak any product name (e.g. "Milk", "Biscuits", "Maggi").
+     Results show stock, price, and exact directions:
+     (e.g., ">> Walk straight, turn RIGHT into Dairy Chiller (Shelf A)").
+   - On ESP32: Hold Button 2 (GPIO 19) for 1 second.
+     Display says "RELEASE TO SPEAK". Speak into the INMP441 mic ("Where is milk?").
+     ESP32 uploads audio to Django Whisper AI and lists available items in rows!
+     Press OK to view the navigation direction on the OLED!
+
+4. CHECKOUT & UPI PAYMENT QR DISPLAY:
+   - On Phone: Open the "Cart" tab.
+   - Tap the green button: "CHECKOUT & PAY (Rs. ... )".
+   - An interactive UPI Payment Modal pops up on the phone screen with:
+     * Full UPI QR code (Google Pay, PhonePe, Paytm, BHIM)
+     * Exact final total and discount savings
+     * UPI VPA ID: greenloop@upi
+   - SIMULTANEOUSLY, the ESP32 1.3" OLED display automatically switches to
+     "PAY NOW" mode and renders the 2D UPI QR code on the physical cart display!
+   - Tap "CONFIRM PAYMENT RECEIVED" on the phone (or press OK on ESP32).
+   - Order is finalized, points awarded, cart session resets to 0 items, and
+     both displays return to ready status!
+
+================================================================================
+8. TROUBLESHOOTING & FAQ
+================================================================================
+Q: The Mobile App says "Backend Offline" or cannot connect.
+A: 1. Ensure your computer and phone are connected to the exact same Wi-Fi.
+   2. Ensure Windows Firewall is not blocking Python (allow port 8000).
+   3. Check that your PC's IP address hasn't changed. Update it in the Mobile App
+      Settings tab or productDb.ts.
+
+Q: The OLED screen is blank.
+A: 1. Verify wiring: SDA to GPIO 21, SCL to GPIO 22, VCC to 3.3V, GND to GND.
+   2. Ensure you installed the "U8g2" library.
+
+Q: The microphone returns "MIC ERROR".
+A: 1. Ensure INMP441 L/R pin is firmly connected to GND.
+   2. Check SCK (14), WS (15), and SD (32) wiring.
+
+Q: Scanner area says 3 items when cart is empty.
+A: This has been fixed! The app now automatically syncs with the live cart session
+   whenever you switch tabs, modify quantities, delete items, or checkout.
+
+================================================================================
+EOF

@@ -576,7 +576,7 @@ export const productDb = {
     const res = await tryFetchDjango(`api/cart/items/?cart_id=${encodeURIComponent(cleanCartId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: productId, quantity }),
+      body: JSON.stringify({ product_id: productId, quantity, action: 'set' }),
     });
     if (res && res.ok) {
       return await res.json();
@@ -733,12 +733,49 @@ export const productDb = {
   },
 
   // Get UPI Payment QR
-  async getPaymentQr(cartId: string): Promise<any> {
+  async getPaymentQr(cartId: string, fallbackTotal: number = 0, fallbackCount: number = 0): Promise<any> {
     const cleanCartId = cartId.replace(/^CART:/, '').trim() || 'CART-01';
-    const res = await tryFetchDjango(`api/cart/payment-qr/?cart_id=${encodeURIComponent(cleanCartId)}`);
-    if (res && res.ok) {
-      return await res.json();
+    try {
+      const res = await tryFetchDjango(`api/cart/payment-qr/?cart_id=${encodeURIComponent(cleanCartId)}`);
+      if (res && res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch payment QR from backend, using local generator:', e);
     }
-    return null;
+
+    // Local / Offline UPI QR fallback
+    const upiUri = `upi://pay?pa=greenloop@upi&pn=GreenLoopSmartCart&am=${fallbackTotal.toFixed(2)}&cu=INR&tn=${cleanCartId}`;
+    const qrPngBase64 = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiUri)}`;
+
+    return {
+      cartId: cleanCartId,
+      itemCount: fallbackCount,
+      subtotal: fallbackTotal,
+      discountPercent: 0,
+      discountAmount: 0,
+      finalTotal: fallbackTotal,
+      currency: 'INR',
+      upiUri,
+      qrSize: 25,
+      qrPngBase64,
+      oled: {
+        priceScreen: {
+          line1: 'CHECKOUT & PAY',
+          line2: `FINAL: Rs.${fallbackTotal.toFixed(2)}`,
+          line3: `${fallbackCount} ITEMS`,
+          line4: 'PRESS OK FOR QR CODE',
+        },
+      },
+    };
+  },
+
+  // Cancel active payment QR
+  async cancelPaymentQr(cartId: string): Promise<boolean> {
+    const cleanCartId = cartId.replace(/^CART:/, '').trim() || 'CART-01';
+    const res = await tryFetchDjango(`api/cart/payment-qr/?cart_id=${encodeURIComponent(cleanCartId)}`, {
+      method: 'DELETE',
+    });
+    return !!(res && res.ok);
   },
 };
