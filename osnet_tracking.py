@@ -14,7 +14,7 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 # CONFIGURATION
 # ============================================================
 
-CAMERA_INDEX = 2
+CAMERA_INDEX = 1  # Using Iriun webcam for camera number 1
 
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
@@ -62,21 +62,33 @@ if os.path.exists(REID_DIR) and REID_DIR not in sys.path:
 # ============================================================
 
 print("\nLoading YOLO...")
-model = YOLO("yolo11n.pt")
+model_path = "yolo26n.pt" if os.path.exists("yolo26n.pt") else ("backend/ai/models/yolo26n.pt" if os.path.exists("backend/ai/models/yolo26n.pt") else "yolo11n.pt")
+print(f"\nLoading YOLO ({model_path})...")
+model = YOLO(model_path)
 
-print("Loading Deep SORT + OSNet...")
+print("Loading Deep SORT + ReID...")
 
-tracker = DeepSort(
-    max_age=MAX_AGE,
-    n_init=3,
-    max_cosine_distance=MAX_COSINE_DISTANCE,
-    nn_budget=100,
-
-    # OSNet through Torchreid
-    embedder="torchreid",
-    embedder_model_name="osnet_ain_x1_0",
-    embedder_gpu=False
-)
+try:
+    tracker = DeepSort(
+        max_age=MAX_AGE,
+        n_init=3,
+        max_cosine_distance=MAX_COSINE_DISTANCE,
+        nn_budget=100,
+        # OSNet through Torchreid
+        embedder="torchreid",
+        embedder_model_name="osnet_ain_x1_0",
+        embedder_gpu=False
+    )
+except Exception as e:
+    print(f"Torchreid not available ({e}), loading MobileNet ReID embedder...")
+    tracker = DeepSort(
+        max_age=MAX_AGE,
+        n_init=3,
+        max_cosine_distance=MAX_COSINE_DISTANCE,
+        nn_budget=100,
+        embedder="mobilenet",
+        embedder_gpu=False
+    )
 
 print("Models loaded successfully.")
 
@@ -421,10 +433,11 @@ track_match_votes = {}
 
 
 # ============================================================
-# CAMERA
+# CAMERA (IRIUN WEBCAM ON INDEX 1)
 # ============================================================
 
-cap = cv2.VideoCapture(CAMERA_INDEX)
+print(f"Opening Iriun camera (Index {CAMERA_INDEX})...")
+cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
 
 cap.set(
     cv2.CAP_PROP_FRAME_WIDTH,

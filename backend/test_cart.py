@@ -62,6 +62,30 @@ print("OLED Line 4:", serialized["oled"]["line4"])
 assert len(serialized["oled"]["line1"]) <= 22, "Line 1 should fit on 1.3 OLED"
 print(">>> PASS: OLED lines formatted within 128x64 pixel budget!")
 
+# TEST 5: Two-Step Payment QR & Final Price Verification
+print("\n--- TEST 5: 2-Step Payment QR & Final Price Verification ---")
+import json
+from django.test import RequestFactory
+from smart_cart.views import payment_qr_view
+rf = RequestFactory()
+req = rf.get('/api/cart/payment-qr/?cart_id=CART-01')
+res = payment_qr_view(req)
+qr_data = json.loads(res.content)
+print("Step 1 OLED Price Screen:", qr_data["oled"]["priceScreen"])
+print(f"  -> Line 1: [{qr_data['oled']['priceScreen']['line1']}]")
+print(f"  -> Line 2: [{qr_data['oled']['priceScreen']['line2']}]")
+print(f"  -> Line 3: [{qr_data['oled']['priceScreen']['line3']}]")
+print(f"  -> Line 4: [{qr_data['oled']['priceScreen']['line4']}]")
+
+print("\nStep 2 OLED QR Code Display:")
+print(f"  -> QR Pixel Matrix: {qr_data['qrSize']} x {qr_data['qrSize']} modules")
+print(f"  -> UPI URI: {qr_data['upiUri']}")
+print(f"  -> Title: {qr_data['oled']['qrScreen']['title']} | Prompt: {qr_data['oled']['qrScreen']['prompt']}")
+assert qr_data["finalTotal"] > 0, "Final total should be calculated"
+assert len(qr_data["qrMatrix"]) > 0, "QR matrix rows must exist"
+assert "PRESS OK FOR QR CODE" in qr_data["oled"]["priceScreen"]["line4"]
+print(">>> PASS: 2-Step Payment flow (Final Price -> OK -> QR Display) verified successfully!")
+
 print("\n" + "=" * 60)
 print("ALL TESTS COMPLETED SUCCESSFULLY!")
 print("=" * 60)

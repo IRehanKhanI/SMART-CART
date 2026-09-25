@@ -47,11 +47,11 @@ class Command(BaseCommand):
             # --- Biscuits & Cookies ---
             {
                 "sku": "BISC-PARLE-01",
-                "name": "Parle-G Original Glucose Biscuits (250g)",
-                "category": "Biscuits & Bakery",
-                "price": Decimal("25.00"),
+                "name": "Fresh Muffin Cake (120g)",
+                "category": "Bakery",
+                "price": Decimal("45.00"),
                 "barcode": "890171901001",
-                "shelf_location": "Aisle 2 - Biscuit Rack 1",
+                "shelf_location": "Bakery Counter - Rack 2",
                 "current_stock": 100,
             },
             {
@@ -133,12 +133,12 @@ class Command(BaseCommand):
 
             # --- Staples, Atta & Oil ---
             {
-                "sku": "ATTA-AASHIR-01",
-                "name": "Aashirvaad Shudh Chakki Whole Wheat Atta (5kg)",
-                "category": "Pantry & Staples",
-                "price": Decimal("275.00"),
-                "barcode": "890103004001",
-                "shelf_location": "Aisle 1 - Flour Bay",
+                "sku": "BEV-COKE-01",
+                "name": "Coca-Cola (Coke)",
+                "category": "Beverages",
+                "price": Decimal("40.00"),
+                "barcode": "8901764012011",
+                "shelf_location": "Aisle 1 - Cold Beverage Chiller",
                 "current_stock": 50,
             },
             {
@@ -318,7 +318,7 @@ class Command(BaseCommand):
 
         # --- D. Indian Basket #4: Monthly Staples (Aashirvaad Atta + Fortune Oil + Tata Salt) ---
         for i in range(18):
-            add_order(None, ["ATTA-AASHIR-01", "OIL-FORTUNE-01", "SALT-TATA-01"], days_ago=i + 1)
+            add_order(None, ["drink011", "OIL-FORTUNE-01", "SALT-TATA-01"], days_ago=i + 1)
 
         # --- E. Indian Basket #5: Evening Chai & Snacks (Tata Tea + Haldiram's Bhujia + Good Day) ---
         for i in range(14):

@@ -44,7 +44,51 @@ def analyze_product_image(image_bytes: bytes) -> Tuple[Optional[Product], float,
 
     height, width = frame.shape[:2]
 
-    # --- 1. QR / Barcode Detection ---
+    # --- 1. Barcode & QR Code Detection (zxing-cpp + cv2.barcode + QRCodeDetector) ---
+    # Fast multi-format barcode scanning (EAN-13, UPC, Code 128, QR Code, DataMatrix)
+    try:
+        import zxingcpp
+        barcodes = zxingcpp.read_barcodes(frame)
+        for bc in barcodes:
+            raw_text = bc.text.strip()
+            format_name = str(bc.format)
+            if raw_text:
+                matched = (
+                    Product.objects.filter(barcode=raw_text).first()
+                    or Product.objects.filter(barcode__endswith=raw_text).first()
+                    or Product.objects.filter(sku=raw_text).first()
+                )
+                if matched:
+                    return matched, 0.99, f"barcode_{format_name}", {
+                        "barcode": raw_text,
+                        "format": format_name,
+                        "resolution": f"{width}x{height}",
+                    }
+    except Exception:
+        pass
+
+    # Fallback to OpenCV Barcode Detector
+    try:
+        if hasattr(cv2, "barcode"):
+            barcode_detector = cv2.barcode.BarcodeDetector()
+            res = barcode_detector.detectAndDecode(frame)
+            decoded_text = res[0] if isinstance(res, (tuple, list)) else str(res)
+            if decoded_text:
+                text = decoded_text.strip()
+                matched = (
+                    Product.objects.filter(barcode=text).first()
+                    or Product.objects.filter(barcode__endswith=text).first()
+                    or Product.objects.filter(sku=text).first()
+                )
+                if matched:
+                    return matched, 0.98, "barcode_1d", {
+                        "barcode": text,
+                        "resolution": f"{width}x{height}",
+                    }
+    except Exception:
+        pass
+
+    # Fallback to OpenCV QR Code Detector
     try:
         qr_detector = cv2.QRCodeDetector()
         decoded_text, points, _ = qr_detector.detectAndDecode(frame)
@@ -178,7 +222,7 @@ def analyze_product_image(image_bytes: bytes) -> Tuple[Optional[Product], float,
     scores["SAUCE-KISSAN-01"] = (red_ratio * 7.0)
 
     # 8. ATTA & OIL (Aashirvaad Atta, Fortune Sunflower Oil)
-    scores["ATTA-AASHIR-01"] = (brown_ratio * 4.0) + (yellow_ratio * 2.5) + (green_ratio * 1.5)
+    scores["drink011"] = (brown_ratio * 4.0) + (yellow_ratio * 2.5) + (green_ratio * 1.5)
     # Fortune Oil is clear golden yellow with NO significant red
     scores["OIL-FORTUNE-01"] = (yellow_ratio * 5.0) + (white_ratio * 1.5) - (red_ratio * 5.0)
 
@@ -187,6 +231,12 @@ def analyze_product_image(image_bytes: bytes) -> Tuple[Optional[Product], float,
 
     # 10. CADBURY DAIRY MILK (Iconic royal purple wrapper)
     scores["CHOC-DAIRYMILK-01"] = (purple_ratio * 8.0) + (dark_ratio * 2.0)
+
+    # 11. COCA-COLA (Iconic vibrant Coke red label with white font + dark cola liquid)
+    scores["BEV-COKE-01"] = (red_ratio * 7.5) + (dark_ratio * 3.5) + (white_ratio * 1.5)
+
+    # 12. CHOC-CHIP MUFFIN (Bakery golden brown pastry with dark chocolate chips)
+    scores["BAKE-MUFFIN-01"] = (brown_ratio * 6.0) + (dark_ratio * 3.0) + (yellow_ratio * 2.0)
 
     # 11. HALDIRAM'S BHUJIA & LAY'S CHIPS
     scores["SNACK-BHUJIA-01"] = (yellow_ratio * 3.5) + (red_ratio * 3.0)

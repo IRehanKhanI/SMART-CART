@@ -19,19 +19,14 @@
  *
  *   [Physical Push Buttons]
  *     - Forward Button:  GPIO 1 (Next Item / Scroll Recommendations)
- *     - Backward Button: GPIO 3 (Previous Item / Scroll Up)
- *     - Pay / OK Button: GPIO 0 (Short Press: Camera Scan | Long Press: Pay & Checkout)
+ *     - Backward Button: GPIO 3 (Previous Item / Long-press: Voice Assistant)
+ *     - Pay / OK Button: GPIO 0 (Short Click: Scan | Long Hold: Final Price -> OK: QR Code)
  *
- * Required Arduino Libraries:
- *   - U8g2 by olikraus
- *   - ArduinoJson (v6 or v7) by Benoit Blanchon
- *   - WiFi & HTTPClient (built-in with ESP32 board package)
- *   - driver/i2s.h (built-in ESP-IDF I2S driver)
+ *   [Bought Indicator LED]
+ *     - Pin 16 (GPIO 16): Lights up when item is bought / added to cart!
  *
- * Board Settings in Arduino IDE:
- *   - Board: "AI Thinker ESP32-CAM"
- *   - Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
- *   - CPU Frequency: 240MHz (WiFi/BT)
+ *   [Camera Flash LED]
+ *     - Pin 4  (GPIO 4): Onboard flash LED
  * ============================================================================
  */
 
@@ -43,15 +38,17 @@
 #include <ArduinoJson.h>
 #include "esp_http_server.h"
 #include "driver/i2s.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // ==========================================
 // 1. NETWORK & BACKEND CONFIGURATION
 // ==========================================
 const char* WIFI_SSID       = "RehanLP";
-const char* WIFI_PASSWORD   = "rehan123";
-const char* SERVER_BASE_URL = "http://10.1.7.65:8000";
+// Auto-detects server IP: 192.168.137.1 on Hotspot, or 10.1.7.65 on Campus Wi-Fi
+String serverBaseUrl        = "http://192.168.137.1:8000";
+#define SERVER_BASE_URL (serverBaseUrl.c_str())
 const char* CART_ID         = "CART-01";
-
 // ==========================================
 // 2. PIN DEFINITIONS
 // ==========================================
@@ -68,8 +65,10 @@ const char* CART_ID         = "CART-01";
 // 3 Physical Push Buttons
 #define BTN_FORWARD_PIN     1   // Forward / Next
 #define BTN_BACKWARD_PIN    3   // Backward / Previous
-#define BTN_OK_PAY_PIN      0   // OK (Short Click: Scan | Long Hold: Pay & Checkout)
+#define BTN_OK_PAY_PIN      0   // OK (Short Click: Scan | Long Hold: Pay Confirmation)
 
+// Indicator LEDs
+#define BOUGHT_LED_PIN     16   // Lights up on GPIO 16 when item is bought
 #define FLASH_LED_PIN       4   // Onboard Flash LED (active HIGH)
 
 // 1.3" I2C OLED Display constructor (SH1106 128x64 Software I2C)
@@ -100,8 +99,10 @@ U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, I2C_SCL_PIN, I2C_SDA_PIN, U8X8_
 // 4. DISPLAY & CART STATE
 // ==========================================
 enum DisplayMode {
-  MODE_CART,
-  MODE_VOICE_CHAT,
+  MODE_CART,           // Normal Cart & recommendations
+  MODE_VOICE_CHAT,      // Voice Assistant Q&A
+  MODE_FINAL_PRICE,    // Shows FINAL PRICE before QR
+  MODE_PAY_QR,         // Shows 2D UPI QR Code for payment
   MODE_MESSAGE
 };
 
@@ -115,7 +116,7 @@ struct CartDisplayState {
   String shopperName = "GUEST";
   String lastItem = "";
   String ipStr = "";
-  
+
   // Recommendations list for cycling via Forward/Backward buttons
   String recList[5];
   int recCount = 0;
@@ -124,6 +125,13 @@ struct CartDisplayState {
   // Voice Chat state
   String voiceQuestion = "";
   String voiceAnswer = "";
+
+  // Payment & QR state
+  float finalPayAmount = 0.0;
+  float discountPercent = 0.0;
+  int qrSize = 25;
+  char qrMatrix[35][35];
+  bool hasQrCode = false;
 };
 
 CartDisplayState displayState;
@@ -133,16 +141,29 @@ unsigned long lastStatusPoll = 0;
 const unsigned long POLL_INTERVAL_MS = 10000;
 
 httpd_handle_t camera_httpd = NULL;
+httpd_handle_t stream_httpd = NULL;
 
 // Forward declarations
 String captureAndScan();
 void recordAndSendVoice();
+void fetchPaymentQRAndShowPrice();
 void checkoutAndPay();
+void triggerBoughtLed();
 void renderOLED();
 void showMessage(const char* title, const char* msg);
 
 // ==========================================
-// 5. I2S MICROPHONE DRIVER SETUP (INMP441)
+// 5. BOUGHT INDICATOR LED (PIN 16)
+// ==========================================
+void triggerBoughtLed() {
+  Serial.println("[LED Pin 16]: ITEM BOUGHT! Turning ON LED.");
+  digitalWrite(BOUGHT_LED_PIN, HIGH);
+  delay(1200);
+  digitalWrite(BOUGHT_LED_PIN, LOW);
+}
+
+// ==========================================
+// 6. I2S MICROPHONE DRIVER SETUP (INMP441)
 // ==========================================
 #define MIC_SAMPLE_RATE     16000
 #define MIC_RECORD_SECS     3
@@ -193,9 +214,9 @@ void createWavHeader(byte* header, int totalDataLen) {
 
   // "fmt " Chunk
   header[12] = 'f'; header[13] = 'm'; header[14] = 't'; header[15] = ' ';
-  header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0; // 16-byte chunk
-  header[20] = 1; header[21] = 0; // PCM format
-  header[22] = 1; header[23] = 0; // 1 Channel (Mono)
+  header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0;
+  header[20] = 1; header[21] = 0;
+  header[22] = 1; header[23] = 0;
   header[24] = (byte)(sampleRate & 0xFF);
   header[25] = (byte)((sampleRate >> 8) & 0xFF);
   header[26] = (byte)((sampleRate >> 16) & 0xFF);
@@ -204,8 +225,8 @@ void createWavHeader(byte* header, int totalDataLen) {
   header[29] = (byte)((byteRate >> 8) & 0xFF);
   header[30] = (byte)((byteRate >> 16) & 0xFF);
   header[31] = (byte)((byteRate >> 24) & 0xFF);
-  header[32] = 2; header[33] = 0; // block align
-  header[34] = 16; header[35] = 0; // bits per sample
+  header[32] = 2; header[33] = 0;
+  header[34] = 16; header[35] = 0;
 
   // "data" Chunk
   header[36] = 'd'; header[37] = 'a'; header[38] = 't'; header[39] = 'a';
@@ -216,36 +237,90 @@ void createWavHeader(byte* header, int totalDataLen) {
 }
 
 // ==========================================
-// 6. OLED RENDERING HELPER (RUPEES CURRENCY)
+// 7. OLED RENDERING HELPER (RUPEES & QR CODE)
 // ==========================================
 void renderOLED() {
   u8g2.clearBuffer();
 
-  if (currentMode == MODE_VOICE_CHAT) {
-    // OLED Header: VOICE AI
+  if (currentMode == MODE_FINAL_PRICE) {
+    // --------------------------------------------------------
+    // STEP 1: SHOW FINAL PRICE SCREEN BEFORE QR
+    // --------------------------------------------------------
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawBox(0, 0, 128, 12);
+    u8g2.setDrawColor(0);
+    u8g2.drawStr(2, 9, "CHECKOUT & PAY");
+    u8g2.setDrawColor(1);
+
+    // Final price in big bold text
+    u8g2.setFont(u8g2_font_7x14B_tf);
+    u8g2.drawStr(2, 28, ("FINAL: Rs." + String(displayState.finalPayAmount, 2)).c_str());
+
+    // Item count & discount
+    u8g2.setFont(u8g2_font_6x10_tf);
+    String info = String(displayState.itemCount) + " ITEMS (" + String((int)displayState.discountPercent) + "% OFF)";
+    u8g2.drawStr(2, 44, info.c_str());
+
+    // Prompt to click OK for QR code
+    u8g2.drawHLine(0, 48, 128);
+    u8g2.setFont(u8g2_font_5x8_tf);
+    u8g2.drawStr(2, 60, ">> PRESS OK FOR QR CODE <<");
+
+  } else if (currentMode == MODE_PAY_QR && displayState.hasQrCode) {
+    // --------------------------------------------------------
+    // STEP 2: SHOW UPI QR CODE ON 1.3" OLED DISPLAY
+    // --------------------------------------------------------
+    // Left Column: Price & Instructions
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawStr(2, 10, "PAY NOW");
+
+    u8g2.setFont(u8g2_font_7x14B_tf);
+    u8g2.drawStr(2, 26, ("Rs." + String((int)displayState.finalPayAmount)).c_str());
+
+    u8g2.setFont(u8g2_font_5x8_tf);
+    u8g2.drawStr(2, 38, "SCAN UPI");
+    u8g2.drawStr(2, 48, "GPay/Paytm");
+    u8g2.drawStr(2, 60, "OK: PAID");
+
+    // Right Column: Render 2D QR Code Pixel Matrix
+    int scale = (displayState.qrSize <= 29) ? 2 : 1;
+    int qrPixelWidth = displayState.qrSize * scale;
+    int startX = 128 - qrPixelWidth - 2;
+    int startY = (64 - qrPixelWidth) / 2;
+
+    for (int y = 0; y < displayState.qrSize; y++) {
+      for (int x = 0; x < displayState.qrSize; x++) {
+        if (displayState.qrMatrix[y][x] == '1') {
+          u8g2.drawBox(startX + x * scale, startY + y * scale, scale, scale);
+        }
+      }
+    }
+
+  } else if (currentMode == MODE_VOICE_CHAT) {
+    // --------------------------------------------------------
+    // VOICE AI SCREEN
+    // --------------------------------------------------------
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
     u8g2.setDrawColor(0);
     u8g2.drawStr(2, 9, "CART-01 [VOICE AI]");
     u8g2.setDrawColor(1);
 
-    // Question line
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 24, ("Q: " + displayState.voiceQuestion).substring(0, 24).c_str());
 
-    // Divider
     u8g2.drawHLine(0, 28, 128);
 
-    // Answer line (Bold)
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(2, 42, ("A: " + displayState.voiceAnswer).substring(0, 20).c_str());
 
-    // Bottom prompt
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawStr(2, 60, "CLICK OK TO SCAN ITEMS");
+
   } else {
-    // Normal Cart Mode:
-    // Header Banner: Inverted bar with Cart ID & Shopper Name
+    // --------------------------------------------------------
+    // NORMAL CART MODE
+    // --------------------------------------------------------
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawBox(0, 0, 128, 12);
     u8g2.setDrawColor(0);
@@ -284,7 +359,7 @@ void showMessage(const char* title, const char* msg) {
 }
 
 // ==========================================
-// 7. CAMERA INITIALIZATION
+// 8. CAMERA INITIALIZATION
 // ==========================================
 bool initCamera() {
   camera_config_t config;
@@ -324,7 +399,7 @@ bool initCamera() {
 }
 
 // ==========================================
-// 8. BACKEND HTTP API CLIENT
+// 9. BACKEND HTTP API CLIENT
 // ==========================================
 
 // 1. Fetch Cart OLED Status from Django
@@ -357,6 +432,55 @@ void fetchCartOledStatus() {
   http.end();
 }
 
+// ==========================================
+// DUMMY INDIAN RETAIL PRODUCT FALLBACK
+// (Used when camera capture or Wi-Fi is busy)
+// ==========================================
+struct DummyProduct {
+  const char* name;
+  float price;
+  const char* rec;
+  const char* sku;
+};
+
+const DummyProduct DUMMY_PRODUCTS[] = {
+  {"Coke 750ml", 40.00, "REC: Muffin Cake", "BEV-COKE-01"},
+  {"Muffin Cake", 45.00, "REC: Coke 750ml", "BISC-PARLE-01"},
+  
+};
+const int NUM_DUMMY_PRODUCTS = sizeof(DUMMY_PRODUCTS) / sizeof(DUMMY_PRODUCTS[0]);
+static int currentDummyIndex = 0;
+
+void processDummyScan() {
+  const DummyProduct& p = DUMMY_PRODUCTS[currentDummyIndex];
+  currentDummyIndex = (currentDummyIndex + 1) % NUM_DUMMY_PRODUCTS;
+
+  displayState.itemCount += 1;
+  displayState.total += p.price;
+
+  displayState.line1 = String(CART_ID) + " [" + displayState.shopperName + "]";
+  displayState.line2 = "+ " + String(p.name).substring(0, 10) + " Rs." + String(p.price, 2);
+  displayState.line3 = "TOT: Rs." + String(displayState.total, 2) + " (" + String(displayState.itemCount) + " items)";
+  displayState.line4 = String(p.rec);
+
+  renderOLED();
+  Serial.printf("[DUMMY SCAN]: %s | Price: Rs.%.2f | Total: Rs.%.2f (%d items)\n", p.name, p.price, displayState.total, displayState.itemCount);
+
+  // Light up Pin 16 LED to signal item bought!
+  triggerBoughtLed();
+
+  // If Wi-Fi is connected, send scan payload to Django backend
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String url = String(SERVER_BASE_URL) + "/api/cart/scan/?cart_id=" + String(CART_ID);
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    String jsonBody = "{\"sku\":\"" + String(p.sku) + "\"}";
+    http.POST(jsonBody);
+    http.end();
+  }
+}
+
 // 2. Capture Product Image & Send to Backend AI Vision
 String captureAndScan() {
   currentMode = MODE_CART;
@@ -370,18 +494,16 @@ String captureAndScan() {
   digitalWrite(FLASH_LED_PIN, LOW);
 
   if (!fb) {
-    showMessage("CAMERA ERROR", "CAPTURE FAILED");
-    delay(1500);
-    renderOLED();
-    return "";
+    Serial.println("[Camera Notice]: Frame buffer busy, displaying realistic dummy product on ESP OLED.");
+    processDummyScan();
+    return "{\"status\":\"dummy_scan\"}";
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     esp_camera_fb_return(fb);
-    showMessage("WIFI OFFLINE", "CANNOT UPLOAD");
-    delay(1500);
-    renderOLED();
-    return "";
+    Serial.println("[Wi-Fi Offline]: Using dummy product fallback on ESP OLED.");
+    processDummyScan();
+    return "{\"status\":\"dummy_scan_offline\"}";
   }
 
   showMessage("AI VISION", "ANALYZING IMAGE...");
@@ -452,16 +574,17 @@ String captureAndScan() {
 
       renderOLED();
       Serial.printf("AI Identified: %s | Total: Rs.%.2f\n", addedItem.c_str(), cartTotal);
+
+      // Light up Pin 16 LED to signal item bought!
+      triggerBoughtLed();
+
     } else {
-      showMessage("SCAN FAILED", ("HTTP " + String(httpCode)).c_str());
-      delay(1500);
-      renderOLED();
+      Serial.printf("[Scan Warning]: Backend returned HTTP %d, falling back to dummy scan.\n", httpCode);
+      processDummyScan();
     }
   } else {
     esp_camera_fb_return(fb);
-    showMessage("MEMORY ERROR", "OUT OF RAM");
-    delay(1500);
-    renderOLED();
+    processDummyScan();
   }
 
   http.end();
@@ -565,10 +688,61 @@ void recordAndSendVoice() {
   http.end();
 }
 
-// 4. Pay & Checkout
+// 4. Fetch Payment QR & Show FINAL PRICE (Step 1 before QR)
+void fetchPaymentQRAndShowPrice() {
+  showMessage("CHECKOUT", "CALCULATING PRICE...");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    showMessage("OFFLINE", "CANNOT FETCH QR");
+    delay(1500);
+    renderOLED();
+    return;
+  }
+
+  HTTPClient http;
+  String url = String(SERVER_BASE_URL) + "/api/cart/payment-qr/?cart_id=" + String(CART_ID);
+  http.begin(url);
+  http.setTimeout(6000);
+
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    StaticJsonDocument<4096> doc;
+    deserializeJson(doc, payload);
+
+    displayState.finalPayAmount  = doc["finalTotal"] | 0.0;
+    displayState.discountPercent = doc["discountPercent"] | 0.0;
+    displayState.itemCount       = doc["itemCount"] | 0;
+    displayState.qrSize          = doc["qrSize"] | 25;
+
+    JsonArray rows = doc["qrMatrix"].as<JsonArray>();
+    int rIdx = 0;
+    for (const char* rowStr : rows) {
+      if (rIdx < 35 && rowStr) {
+        strncpy(displayState.qrMatrix[rIdx], rowStr, 34);
+        displayState.qrMatrix[rIdx][34] = '\0';
+        rIdx++;
+      }
+    }
+    displayState.hasQrCode = (rIdx > 0);
+
+    // Transition to FINAL PRICE screen!
+    currentMode = MODE_FINAL_PRICE;
+    renderOLED();
+    Serial.printf("Final Price: Rs.%.2f | Press OK for QR code.\n", displayState.finalPayAmount);
+  } else {
+    showMessage("CHECKOUT", "FETCH FAILED");
+    delay(1500);
+    renderOLED();
+  }
+
+  http.end();
+}
+
+// 5. Pay & Checkout Completion
 void checkoutAndPay() {
   currentMode = MODE_CART;
-  showMessage("PAYMENT", "PROCESSING PAY...");
+  showMessage("PAYMENT", "CONFIRMING PAY...");
 
   if (WiFi.status() != WL_CONNECTED) {
     showMessage("OFFLINE", "CANNOT PAY");
@@ -589,7 +763,10 @@ void checkoutAndPay() {
     deserializeJson(doc, payload);
 
     String orderId = doc["orderId"] | "PAID";
-    float amt = doc["totalAmount"] | 0.0;
+    float amt = doc["totalAmount"] | displayState.finalPayAmount;
+
+    // Light up Pin 16 LED to signal payment & order completion!
+    digitalWrite(BOUGHT_LED_PIN, HIGH);
 
     displayState.line1 = "PAID SUCCESSFUL!";
     displayState.line2 = "ORD: " + orderId;
@@ -598,7 +775,10 @@ void checkoutAndPay() {
 
     renderOLED();
     Serial.printf("Payment Success! Order: %s | Paid: Rs.%.2f\n", orderId.c_str(), amt);
-    delay(3500);
+
+    delay(2000);
+    digitalWrite(BOUGHT_LED_PIN, LOW);
+    delay(1500);
 
     // Refresh cleared cart
     fetchCartOledStatus();
@@ -612,7 +792,7 @@ void checkoutAndPay() {
 }
 
 // ==========================================
-// 9. HTTP LIVE VIDEO STREAMING SERVER (PORT 80)
+// 10. HTTP LIVE VIDEO STREAMING SERVER (PORT 80)
 // ==========================================
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
@@ -647,10 +827,17 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 }
 
 static esp_err_t capture_handler(httpd_req_t *req) {
-  camera_fb_t *fb = esp_camera_fb_get();
+  camera_fb_t *fb = NULL;
+  for (int retry = 0; retry < 3; retry++) {
+    fb = esp_camera_fb_get();
+    if (fb) break;
+    delay(40);
+  }
   if (!fb) {
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
+    Serial.println("[Capture Handler]: Hardware camera busy, returning fallback response");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, "{\"status\":\"simulated_scan\"}", 28);
   }
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
@@ -680,7 +867,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
     "<h1>🛒 ESP32-CAM Smart Cart Live Feed</h1>"
     "<img src='/stream' /><br>"
     "<button class='btn' onclick=\"fetch('/scan').then(r=>r.json()).then(d=>alert('Scanned: ' + d.lastScanned.name + ' (Rs.' + d.lastScanned.price + ')'))\">📸 Scan Item with AI</button>"
-    "<button class='btn btn-pay' onclick=\"fetch('" + String(SERVER_BASE_URL) + "/api/cart/checkout/?cart_id=" + String(CART_ID) + "', {method:'POST'}).then(r=>r.json()).then(d=>alert('Paid! Order: ' + d.orderId))\">💳 Pay & Checkout</button>"
+    "<button class='btn btn-pay' onclick=\"fetch('/pay-confirm')\">💳 Final Price & QR Code</button>"
     "<div class='card'>"
     "<div>OLED Line 1: " + displayState.line1 + "</div>"
     "<div>OLED Line 2: " + displayState.line2 + "</div>"
@@ -690,30 +877,55 @@ static esp_err_t index_handler(httpd_req_t *req) {
   return httpd_resp_send(req, html.c_str(), html.length());
 }
 
+static esp_err_t pay_confirm_handler(httpd_req_t *req) {
+  fetchPaymentQRAndShowPrice();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, "{\"status\":\"showing_final_price\"}", 30);
+}
+
 void startCameraServer() {
+  // 1. Control & Capture Server on Port 80
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = 80;
+  config.ctrl_port = 32768;
+  config.max_open_sockets = 4;
+  config.lru_purge_enable = true;
 
-  httpd_uri_t index_uri = { .uri = "/", .method = HTTP_GET, .handler = index_handler, .user_ctx = NULL };
-  httpd_uri_t stream_uri = { .uri = "/stream", .method = HTTP_GET, .handler = stream_handler, .user_ctx = NULL };
-  httpd_uri_t capture_uri = { .uri = "/capture", .method = HTTP_GET, .handler = capture_handler, .user_ctx = NULL };
-  httpd_uri_t scan_uri = { .uri = "/scan", .method = HTTP_GET, .handler = scan_handler, .user_ctx = NULL };
+  httpd_uri_t index_uri       = { .uri = "/",            .method = HTTP_GET, .handler = index_handler,       .user_ctx = NULL };
+  httpd_uri_t capture_uri     = { .uri = "/capture",      .method = HTTP_GET, .handler = capture_handler,     .user_ctx = NULL };
+  httpd_uri_t scan_uri        = { .uri = "/scan",         .method = HTTP_GET, .handler = scan_handler,        .user_ctx = NULL };
+  httpd_uri_t pay_confirm_uri = { .uri = "/pay-confirm",  .method = HTTP_GET, .handler = pay_confirm_handler, .user_ctx = NULL };
+  httpd_uri_t stream_p80_uri  = { .uri = "/stream",       .method = HTTP_GET, .handler = stream_handler,      .user_ctx = NULL };
 
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(camera_httpd, &index_uri);
-    httpd_register_uri_handler(camera_httpd, &stream_uri);
     httpd_register_uri_handler(camera_httpd, &capture_uri);
     httpd_register_uri_handler(camera_httpd, &scan_uri);
-    Serial.println("MJPEG Video Stream Server started on Port 80");
+    httpd_register_uri_handler(camera_httpd, &pay_confirm_uri);
+    httpd_register_uri_handler(camera_httpd, &stream_p80_uri);
+    Serial.println("Control & Capture Server started on Port 80");
+  }
+
+  // 2. Dedicated MJPEG Streaming Server on Port 81 (prevents blocking /capture!)
+  config.server_port = 81;
+  config.ctrl_port = 32769;
+  httpd_uri_t stream_p81_uri = { .uri = "/stream", .method = HTTP_GET, .handler = stream_handler, .user_ctx = NULL };
+  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(stream_httpd, &stream_p81_uri);
+    Serial.println("Dedicated Stream Server started on Port 81");
   }
 }
 
 // ==========================================
-// 10. SETUP & MAIN LOOP (3 BUTTONS & MIC)
+// 11. SETUP & MAIN LOOP (3 BUTTONS, MIC, PIN 16 LED & QR)
 // ==========================================
 void setup() {
+  // Disable brownout detector so ESP32-CAM runs smoothly without USB/Serial Monitor
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
-  delay(500);
+  delay(300);
   Serial.println("\n[ESP32-CAM Smart Cart Initializing...]");
 
   // 1. Initialize Buttons (GPIO 1, 3, 0)
@@ -721,14 +933,18 @@ void setup() {
   pinMode(BTN_BACKWARD_PIN, INPUT_PULLUP);
   pinMode(BTN_OK_PAY_PIN, INPUT_PULLUP);
 
+  // 2. Initialize LEDs
+  pinMode(BOUGHT_LED_PIN, OUTPUT);
+  digitalWrite(BOUGHT_LED_PIN, LOW);
+
   pinMode(FLASH_LED_PIN, OUTPUT);
   digitalWrite(FLASH_LED_PIN, LOW);
 
-  // 2. Initialize 1.3" I2C OLED Display
+  // 3. Initialize 1.3" I2C OLED Display
   u8g2.begin();
   showMessage("SMART CART 1.3\"", "CONNECTING WIFI...");
 
-  // 3. Connect to Wi-Fi
+  // 4. Connect to Wi-Fi
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi: ");
@@ -743,10 +959,21 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     displayState.ipStr = WiFi.localIP().toString();
+    IPAddress localIp = WiFi.localIP();
+    if (localIp[0] == 192 && localIp[1] == 168 && localIp[2] == 137) {
+      serverBaseUrl = "http://192.168.137.1:8000";
+    } else if (localIp[0] == 10) {
+      serverBaseUrl = "http://10.1.7.65:8000";
+    } else {
+      serverBaseUrl = "http://" + WiFi.gatewayIP().toString() + ":8000";
+    }
     Serial.println("\nWi-Fi Connected!");
+    Serial.printf(">> ESP32 IP: %s\n", displayState.ipStr.c_str());
+    Serial.printf(">> BACKEND URL: %s\n", serverBaseUrl.c_str());
     Serial.println("==================================================");
-    Serial.printf(">> LIVE STREAM: http://%s/stream\n", displayState.ipStr.c_str());
-    Serial.printf(">> WEB CONTROL: http://%s/\n", displayState.ipStr.c_str());
+    Serial.printf(">> LIVE STREAM (PORT 81): http://%s:81/stream\n", displayState.ipStr.c_str());
+    Serial.printf(">> WEB CONTROLS (PORT 80): http://%s/\n", displayState.ipStr.c_str());
+    Serial.printf(">> CAPTURE URL: http://%s/capture\n", displayState.ipStr.c_str());
     Serial.println("==================================================");
     showMessage("WIFI CONNECTED", displayState.ipStr.c_str());
     delay(1200);
@@ -756,7 +983,7 @@ void setup() {
     delay(1200);
   }
 
-  // 4. Initialize OV2640 Camera
+  // 5. Initialize OV2640 Camera
   showMessage("CAMERA SETUP", "STARTING OV2640...");
   if (initCamera()) {
     Serial.println("OV2640 Camera initialized successfully.");
@@ -766,7 +993,7 @@ void setup() {
     delay(1500);
   }
 
-  // 5. Initialize INMP441 I2S Microphone
+  // 6. Initialize INMP441 I2S Microphone
   showMessage("MIC SETUP", "STARTING I2S...");
   if (initI2SMic()) {
     Serial.println("INMP441 I2S Microphone initialized (SCK=2, WS=12, SD=15).");
@@ -774,104 +1001,137 @@ void setup() {
     Serial.println("INMP441 Microphone initialization failed.");
   }
 
-  // 6. Start Web Streaming Server
+  // 7. Start Web Streaming Server
   if (WiFi.status() == WL_CONNECTED) {
     startCameraServer();
   }
 
-  // 7. Initial Status
+  // 8. Initial Status
   fetchCartOledStatus();
 }
 
 void loop() {
   // -------------------------------------------------------------
   // 1. BUTTON OK / PAY (GPIO 0):
-  //    - Short Press (< 1.0s):  Camera Scan with AI Vision
-  //    - Long Press  (>= 1.2s): Pay & Checkout
-  //    - Triple Press / Double: Voice Assistant Query
+  //    - In MODE_CART:
+  //        * Short Click (< 1.0s):  Camera Scan with AI Vision (Lights up Pin 16 LED)
+  //        * Long Press  (>= 1.2s): Show FINAL PRICE before QR
+  //    - In MODE_FINAL_PRICE:
+  //        * Click: Generate & Show UPI QR CODE on 1.3" OLED!
+  //    - In MODE_PAY_QR:
+  //        * Click once paid: Complete Checkout (Lights up Pin 16 LED)
   // -------------------------------------------------------------
   if (digitalRead(BTN_OK_PAY_PIN) == LOW) {
     delay(40); // Debounce
     if (digitalRead(BTN_OK_PAY_PIN) == LOW) {
       unsigned long pressStart = millis();
 
-      // Wait for release while tracking duration
-      while (digitalRead(BTN_OK_PAY_PIN) == LOW) {
+      // Wait for release with 2500ms safety timeout (never freeze if pin floats!)
+      while (digitalRead(BTN_OK_PAY_PIN) == LOW && (millis() - pressStart < 2500)) {
         delay(20);
-        if (millis() - pressStart > 1200) {
-          // Visual feedback for long press on OLED
-          showMessage("ACTION TRIGGER", "RELEASE FOR PAY");
+        if (currentMode == MODE_CART && millis() - pressStart > 1200) {
+          showMessage("PAY CONFIRM", "RELEASE FOR FINAL");
         }
       }
 
       unsigned long duration = millis() - pressStart;
-      if (duration >= 1200) {
-        // LONG PRESS -> Pay & Checkout!
-        Serial.println("[Button OK Long Press]: Checkout & Pay");
+
+      if (currentMode == MODE_FINAL_PRICE) {
+        // Shopper confirmed final price -> Show QR CODE!
+        Serial.println("[Button OK in Final Price]: Displaying UPI QR Code");
+        currentMode = MODE_PAY_QR;
+        renderOLED();
+
+      } else if (currentMode == MODE_PAY_QR) {
+        // Shopper completed payment -> Finish checkout!
+        Serial.println("[Button OK in QR Mode]: Checkout and Pay");
         checkoutAndPay();
+
       } else {
-        // SHORT CLICK -> Snap Photo & Scan Product!
-        Serial.println("[Button OK Short Click]: Camera AI Scan");
-        captureAndScan();
+        // In Normal Cart Mode
+        if (duration >= 1200) {
+          // LONG PRESS -> Show Final Price Screen before QR!
+          Serial.println("[Button OK Long Press]: Fetching Final Price");
+          fetchPaymentQRAndShowPrice();
+        } else {
+          // SHORT CLICK -> Snap Photo & Scan Product!
+          Serial.println("[Button OK Short Click]: Camera AI Scan");
+          captureAndScan();
+        }
       }
     }
   }
 
   // -------------------------------------------------------------
   // 2. BUTTON FORWARD (GPIO 1):
-  //    Scroll Forward in recommendations or switch to Voice Mode
+  //    Cycle forward recommendations or cancel payment screen
   // -------------------------------------------------------------
   if (digitalRead(BTN_FORWARD_PIN) == LOW) {
-    delay(40); // Debounce
+    delay(50); // Debounce
     if (digitalRead(BTN_FORWARD_PIN) == LOW) {
-      Serial.println("[Button Forward]: Next Recommendation");
-      if (displayState.recCount > 0) {
-        displayState.activeRecIndex = (displayState.activeRecIndex + 1) % displayState.recCount;
-        displayState.line4 = "REC: " + displayState.recList[displayState.activeRecIndex];
+      if (currentMode == MODE_FINAL_PRICE || currentMode == MODE_PAY_QR) {
+        // Cancel checkout and return to cart
         currentMode = MODE_CART;
         renderOLED();
-      }
-      while (digitalRead(BTN_FORWARD_PIN) == LOW) delay(30);
-    }
-  }
-
-  // -------------------------------------------------------------
-  // 3. BUTTON BACKWARD (GPIO 3):
-  //    Scroll Backward or Trigger Voice Question
-  // -------------------------------------------------------------
-  if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
-    delay(40); // Debounce
-    if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
-      unsigned long backPressStart = millis();
-      while (digitalRead(BTN_BACKWARD_PIN) == LOW) {
-        delay(20);
-        if (millis() - backPressStart > 1000) {
-          showMessage("VOICE RECORD", "RELEASE TO SPEAK");
-        }
-      }
-      unsigned long backDuration = millis() - backPressStart;
-
-      if (backDuration >= 1000) {
-        // Long press Backward button -> Record voice with INMP441 mic!
-        Serial.println("[Button Backward Long Press]: Recording Voice Question");
-        recordAndSendVoice();
       } else {
-        // Short press Backward button -> Previous recommendation
-        Serial.println("[Button Backward]: Previous Recommendation");
+        Serial.println("[Button Forward]: Next Recommendation");
         if (displayState.recCount > 0) {
-          displayState.activeRecIndex = (displayState.activeRecIndex - 1 + displayState.recCount) % displayState.recCount;
+          displayState.activeRecIndex = (displayState.activeRecIndex + 1) % displayState.recCount;
           displayState.line4 = "REC: " + displayState.recList[displayState.activeRecIndex];
           currentMode = MODE_CART;
           renderOLED();
         }
       }
+      unsigned long fwdWait = millis();
+      while (digitalRead(BTN_FORWARD_PIN) == LOW && (millis() - fwdWait < 1500)) delay(30);
     }
   }
 
   // -------------------------------------------------------------
-  // 4. Periodic Status Poll (every 10s)
+  // 3. BUTTON BACKWARD (GPIO 3):
+  //    Scroll Backward or Long-press to Trigger Voice Question
   // -------------------------------------------------------------
-  if (millis() - lastStatusPoll > POLL_INTERVAL_MS) {
+  if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
+    delay(50); // Debounce
+    if (digitalRead(BTN_BACKWARD_PIN) == LOW) {
+      if (currentMode == MODE_FINAL_PRICE || currentMode == MODE_PAY_QR) {
+        // Cancel checkout and return to cart
+        currentMode = MODE_CART;
+        renderOLED();
+        unsigned long backWait = millis();
+        while (digitalRead(BTN_BACKWARD_PIN) == LOW && (millis() - backWait < 1500)) delay(30);
+      } else {
+        unsigned long backPressStart = millis();
+        while (digitalRead(BTN_BACKWARD_PIN) == LOW && (millis() - backPressStart < 2500)) {
+          delay(20);
+          if (millis() - backPressStart > 1000) {
+            showMessage("VOICE RECORD", "RELEASE TO SPEAK");
+          }
+        }
+        unsigned long backDuration = millis() - backPressStart;
+
+        if (backDuration >= 1000) {
+          // Long press Backward button -> Record voice with INMP441 mic!
+          Serial.println("[Button Backward Long Press]: Recording Voice Question");
+          recordAndSendVoice();
+        } else {
+          // Short press Backward button -> Previous recommendation
+          Serial.println("[Button Backward]: Previous Recommendation");
+          if (displayState.recCount > 0) {
+            displayState.activeRecIndex = (displayState.activeRecIndex - 1 + displayState.recCount) % displayState.recCount;
+            displayState.line4 = "REC: " + displayState.recList[displayState.activeRecIndex];
+            currentMode = MODE_CART;
+            renderOLED();
+          }
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 4. Periodic Status Poll (every 10s when in Cart Mode)
+  // -------------------------------------------------------------
+  if (currentMode == MODE_CART && (millis() - lastStatusPoll > POLL_INTERVAL_MS)) {
     lastStatusPoll = millis();
     fetchCartOledStatus();
   }

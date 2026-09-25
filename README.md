@@ -43,29 +43,45 @@ A retail edge intelligence platform featuring an **ESP32-CAM smart cart device**
 
 Because the ESP32-CAM's OV2640 camera uses most GPIO pins, use the dedicated I2C pins below to avoid hardware bus conflicts:
 
-| ESP32-CAM Pin | 1.3" OLED Pin | Component / Notes |
+| ESP32-CAM Pin | Device / Component | Function / Notes |
 | :--- | :--- | :--- |
-| **3.3V or 5V** | **VCC** | OLED Power (check your display voltage tolerance) |
-| **GND** | **GND** | Ground (Common ground) |
-| **GPIO 13** | **SDA** | I2C Data Line (Software I2C / U8g2) |
-| **GPIO 14** | **SCL** | I2C Clock Line (Software I2C / U8g2) |
-| **GPIO 12** | Button Pin 1 | **Blue Tactile Push Button** (Scan Trigger) |
-| **GND** | Button Pin 2 | Button Ground (Internal Pull-Up enabled) |
+| **GPIO 13** | **1.3" OLED SDA** | I2C Data Line (Software I2C / U8g2) |
+| **GPIO 14** | **1.3" OLED SCL** | I2C Clock Line (Software I2C / U8g2) |
+| **3.3V** | OLED VCC / Mic VDD | 3.3V Power Line |
+| **GND** | OLED GND / Mic GND | Common Ground |
+| **GPIO 2** | **INMP441 SCK** | I2S Serial Clock (BCLK) |
+| **GPIO 12** | **INMP441 WS** | I2S Word Select (LRCLK) |
+| **GPIO 15** | **INMP441 SD** | I2S Serial Audio Data Out (DOUT) |
+| **GPIO 1** | **Forward Button** | Scroll Next Recommendation / Cart Item |
+| **GPIO 3** | **Backward Button** | Scroll Prev Item / Long Press: Voice Query |
+| **GPIO 0** | **Pay / OK Button** | Short Click: AI Scan \| Long Hold: Final Price \| OK: QR Code |
+| **GPIO 16** | **Bought LED** | **Lights up when item is bought / added to cart & paid!** |
 | **GPIO 4** | Onboard Flash | Flash LED for low-light shelf tag capture |
 
-### 🎙️ INMP441 I2S Digital Microphone Wiring (Circular Breakout)
+---
 
-| INMP441 Pin | Connection / Function | Notes |
-| :--- | :--- | :--- |
-| **VDD** | **3.3V** | Power (Connect to 3.3V pin on ESP32) |
-| **GND** | **GND** | Ground |
-| **L/R** | **GND** | Left/Right Channel: Connect to GND for Left channel |
-| **SCK** | **BCLK** | Serial Clock |
-| **WS** | **LRCLK** | Word Select Clock |
-| **SD** | **DOUT / DIN** | Serial Audio Data Output |
+### 💳 Two-Step UPI Payment QR Flow
 
-> [!TIP]
-> **Zero-Conflict Voice Option**: You can also speak directly through your laptop/PC/mobile phone microphone using the interactive **"🎙️ Speak Query"** button in the web dashboard! The audio is sent over Wi-Fi to the local backend, transcribed via the local STT model, and the AI answers both on screen and on the **1.3" OLED display**!
+1. **Step 1: Final Price Confirmation**
+   - Shopper holds the Pay/OK button (or clicks pay in dashboard).
+   - OLED screen displays:
+     ```
+     +-------------------------------+
+     | CHECKOUT & PAY                |
+     | FINAL: Rs. 148.00             |
+     | 3 ITEMS (10% OFF)             |
+     | >> PRESS OK FOR QR CODE <<    |
+     +-------------------------------+
+     ```
+2. **Step 2: Scannable 2D QR Code Generation**
+   - Shopper presses the **OK Button (`GPIO 0`)**.
+   - ESP32 renders the **real 2D UPI QR Code** directly on the 1.3" OLED display (25×25 / 29×29 pixel matrix)!
+   - Can be scanned with **Google Pay**, **PhonePe**, **Paytm**, or any UPI banking app.
+3. **Step 3: Confirmation & LED Signal**
+   - Once payment is confirmed, the shopper clicks OK:
+     - **Pin 16 LED lights up** to celebrate the successful purchase.
+     - OLED announces: `"PAID SUCCESSFUL! THANK YOU"`.
+     - Cart clears automatically for the next shopper.
 
 ---
 

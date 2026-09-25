@@ -10,7 +10,15 @@ class OpenCVVideoSource:
         self.capture: cv2.VideoCapture | None = None
 
     def open(self) -> None:
-        self.capture = cv2.VideoCapture(self.source)
+        import os
+        if isinstance(self.source, int) and os.name == "nt":
+            # Iriun webcam / DirectShow on Windows
+            self.capture = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
+            if not self.capture.isOpened():
+                self.capture = cv2.VideoCapture(self.source)
+        else:
+            self.capture = cv2.VideoCapture(self.source)
+
         if not self.capture.isOpened():
             self.release()
             raise RuntimeError(f"Unable to open video source: {self.source}")
